@@ -1,0 +1,19 @@
+# Core pipeline (moments + plotting + Hugging Face loading)
+numpy
+scipy
+pandas
+astropy
+matplotlib
+seaborn
+galsim
+datasets
+
+# CAS / Gini-M20 / MID morphological indicators (R backend).
+# Needs a working R installation with the SDMTools package (archived on
+# CRAN, install from the archive, see README.md).
+rpy2
+
+# Only needed for the bundled TFHubVAEAutoencoder (skip if you implement
+# your own galmorph.autoencoder.Autoencoder subclass instead).
+# tensorflow>=1.15,<2  # or tensorflow>=2 with tf.compat.v1
+# tensorflow_hub

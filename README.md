@@ -1,0 +1,140 @@
+# galaxy-morphometrics
+
+Standalone toolkit to compute galaxy morphometric statistics and reproduce
+the comparison plots from
+[deep_galaxy_models](https://github.com/McWilliamsCenter/deep_galaxy_models)'s
+`deepgal/validation` (Lanusse et al. 2020), applied to your own data instead
+of the COSMOS + GalSim-Hub pipeline the original repo was built around.
+
+Given postage-stamp galaxy images (loaded from a Hugging Face dataset) and,
+optionally, their reconstruction through a pretrained autoencoder, this
+repo computes:
+
+- **HSM adaptive moments** (GalSim `FindAdaptiveMom`): size `sigma_e`,
+  ellipticity `e`/`e1`/`e2`/`g`/`g1`/`g2`, `rho4`, flux `amp`.
+- **CAS** (Concentration, Asymmetry) — Conselice (2003).
+- **Gini / M20** — Lotz, Primack & Madau (2004).
+- **MID** (Multimode, Intensity, Deviation) — Freeman et al. (2013).
+
+...and renders the same kind of plots as the paper: ellipticity/size
+distributions, `rho4` vs magnitude/size, Gini-M20, M-I, M-D, MID
+distributions, and (when a reference/reconstruction pair is available)
+per-object reconstruction error plots.
+
+## Origin
+
+The statistics and R routines are ported from `deepgal/validation/` in
+deep_galaxy_models with minimal changes (path fixes only). The plotting
+logic is generalized from `deepgal/validation/plotting.py` and the
+`Figure_Moments.ipynb` / `Figure_Morphology.ipynb` notebooks to work on an
+arbitrary number of named datasets instead of the hardcoded
+real/mock/parametric triplet.
+
+## Install
+
+```bash
+pip install -r requirements.txt
+```
+
+GalSim itself has non-Python dependencies (FFTW, TMV/Eigen) — follow the
+[GalSim install instructions](https://github.com/GalSim-developers/GalSim)
+if `pip install galsim` fails.
+
+### R backend (CAS / Gini-M20 / MID)
+
+These indicators call into R via `rpy2`. You need:
+
+```bash
+# R itself, e.g. via conda or your OS package manager
+conda install -c conda-forge r-base
+
+# SDMTools was archived on CRAN; install the last release from the archive
+R -e 'install.packages("https://cran.r-project.org/src/contrib/Archive/SDMTools/SDMTools_1.1-221.2.tar.gz", repos=NULL, type="source")'
+```
+
+If you don't need CAS/Gini-M20/MID, pass `--skip-r` to skip this
+dependency entirely — you still get the full set of HSM moments and
+their plots.
+
+### Autoencoder (optional)
+
+Reconstructing images requires a model. `galmorph/autoencoder.py` defines
+a minimal `Autoencoder` interface (`encode`/`decode`) plus:
+
+- `IdentityAutoencoder`: no-op, useful to sanity-check the pipeline.
+- `TFHubVAEAutoencoder`: wraps a TF1-style TF-Hub encoder/decoder module
+  pair, compatible with `modules/vae_16/{encoder,decoder}` from
+  deep_galaxy_models (needs `tensorflow` + `tensorflow_hub`).
+
+To plug in your own pretrained model (a Hugging Face model, a PyTorch
+checkpoint, etc.), subclass `Autoencoder` in a small module of your own and
+point `--autoencoder` at it, e.g.:
+
+```python
+# my_autoencoder.py
+from galmorph.autoencoder import Autoencoder
+
+class MyAutoencoder(Autoencoder):
+    def encode(self, images):
+        ...  # images: (N, H, W) float array -> (N, latent_dim)
+
+    def decode(self, codes):
+        ...  # (N, latent_dim) -> (N, H, W) float array
+```
+
+```bash
+python run_morphometrics.py --dataset ... --autoencoder my_autoencoder:MyAutoencoder
+```
+
+## Usage
+
+```bash
+python run_morphometrics.py \
+    --dataset your-org/your-galaxy-dataset --split train \
+    --image-field image --n-samples 2000 --stamp-size 128 \
+    --autoencoder galmorph.autoencoder:TFHubVAEAutoencoder \
+    --encoder-path modules/vae_16/encoder --decoder-path modules/vae_16/decoder \
+    --out-dir results
+```
+
+This will:
+
+1. Load `n-samples` images from the dataset and fit them to `stamp-size` x
+   `stamp-size` postage stamps.
+2. Reconstruct them with the autoencoder (skip `--autoencoder` to only
+   analyze the real images).
+3. Compute HSM moments and (unless `--skip-r`) CAS/Gini-M20/MID for every
+   named set of images.
+4. Save one FITS catalog per set to `results/catalog_<name>.fits`.
+5. Render every applicable plot to `results/plots/`.
+
+Run `python run_morphometrics.py --help` for the full list of options
+(pixel scale, morphology crop size, worker pool size, an optional
+`--binning-field` catalog column for the magnitude/size-binned plots, ...).
+
+### Using the library directly
+
+For more control (e.g. comparing more than two datasets, or data that
+isn't on the Hugging Face Hub), call the pieces directly:
+
+```python
+from galmorph.pipeline import compute_statistics
+from galmorph.plotting import make_all_plots
+
+datasets = {"real": real_stamps, "reconstruction": recon_stamps}
+tables = compute_statistics(datasets, pixel_scale=0.03, morph_crop=64)
+make_all_plots(tables, out_dir="results/plots", reference_name="real")
+```
+
+## Repository layout
+
+```
+run_morphometrics.py       CLI entry point
+galmorph/
+  data.py                  Hugging Face dataset -> postage stamps
+  autoencoder.py           Autoencoder interface + TF-Hub / identity implementations
+  stats.py                 HSM moments (GalSim) + CAS/Gini-M20/MID (R via rpy2)
+  pipeline.py               Per-dataset / multi-dataset statistics computation
+  plotting.py               All comparison plots
+  r_indicators/             R implementation of CAS/Gini-M20/MID (ported as-is)
+```
