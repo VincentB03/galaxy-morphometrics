@@ -70,15 +70,17 @@ R -e 'install.packages("https://cran.r-project.org/src/contrib/Archive/SDMTools/
 ```
 
 On recent toolchains (e.g. Ubuntu 22.04 / R >= 4.x, including Colab), the
-build fails with `error: 'PI' undeclared` in `pointinpolygon.c` — `PI` used
-to come in transitively via `<R.h>` and no longer does. Patch the source
-before installing:
+build fails with `error: 'PI' undeclared` in `pointinpolygon.c` and
+`vincenty.geodesics.c` — `PI` used to come in transitively via `<R.h>` /
+`<Rmath.h>` and no longer does (only `M_PI` is guaranteed). Patch both
+source files before installing:
 
 ```bash
 cd /tmp
 wget -q https://cran.r-project.org/src/contrib/Archive/SDMTools/SDMTools_1.1-221.2.tar.gz
 tar xzf SDMTools_1.1-221.2.tar.gz
 sed -i '9a #include <math.h>\n#define PI M_PI' SDMTools/src/pointinpolygon.c
+sed -i '7a #define PI M_PI' SDMTools/src/vincenty.geodesics.c
 R CMD INSTALL SDMTools
 ```
 
