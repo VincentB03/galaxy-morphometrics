@@ -62,8 +62,24 @@ These indicators call into R via `rpy2`. You need:
 # R itself, e.g. via conda or your OS package manager
 conda install -c conda-forge r-base
 
-# SDMTools was archived on CRAN; install the last release from the archive
+# SDMTools was archived on CRAN; install the last release from the archive.
+# Its dependency R.utils isn't archived, install it from CRAN first or the
+# SDMTools install will fail with "dependency 'R.utils' is not available".
+R -e 'install.packages("R.utils")'
 R -e 'install.packages("https://cran.r-project.org/src/contrib/Archive/SDMTools/SDMTools_1.1-221.2.tar.gz", repos=NULL, type="source")'
+```
+
+On recent toolchains (e.g. Ubuntu 22.04 / R >= 4.x, including Colab), the
+build fails with `error: 'PI' undeclared` in `pointinpolygon.c` — `PI` used
+to come in transitively via `<R.h>` and no longer does. Patch the source
+before installing:
+
+```bash
+cd /tmp
+wget -q https://cran.r-project.org/src/contrib/Archive/SDMTools/SDMTools_1.1-221.2.tar.gz
+tar xzf SDMTools_1.1-221.2.tar.gz
+sed -i '9a #include <math.h>\n#define PI M_PI' SDMTools/src/pointinpolygon.c
+R CMD INSTALL SDMTools
 ```
 
 If you don't need CAS/Gini-M20/MID, pass `--skip-r` to skip this
