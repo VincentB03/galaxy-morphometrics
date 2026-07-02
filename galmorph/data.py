@@ -1,5 +1,7 @@
 # Generic loader turning a Hugging Face image dataset into a stack of
 # postage stamps ready for `galmorph.stats`.
+import os
+
 import numpy as np
 
 
@@ -15,6 +17,7 @@ def load_hf_stamps(
     streaming=False,
     seed=0,
     extra_fields=None,
+    hf_token=None,
 ):
     """
     Loads images from a Hugging Face dataset and turns them into a stack of
@@ -55,6 +58,9 @@ def load_hf_stamps(
         magnitude field to use for binned plots). When given, this
         function returns `(stamps, extra)` where `extra` is a
         dict[str, numpy.ndarray] aligned with `stamps`.
+    hf_token: str, optional
+        Auth token used to access private/gated Hugging Face datasets.
+        Defaults to the `HF_TOKEN` environment variable.
 
     Returns
     -------
@@ -63,7 +69,8 @@ def load_hf_stamps(
     """
     from datasets import load_dataset
 
-    ds = load_dataset(dataset_name, hf_config, split=split, streaming=streaming)
+    token = hf_token if hf_token is not None else os.environ.get("HF_TOKEN")
+    ds = load_dataset(dataset_name, hf_config, split=split, streaming=streaming, token=token)
 
     if n_samples is not None:
         if streaming:

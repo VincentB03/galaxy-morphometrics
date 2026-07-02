@@ -52,6 +52,11 @@ def parse_args():
         help="Optional numeric catalog column (e.g. magnitude) used for the "
              "ellipticity/rho4-vs-binning plots",
     )
+    g_data.add_argument(
+        "--hf-token", default=os.environ.get("HF_TOKEN"),
+        help="Auth token for private/gated Hugging Face datasets. "
+             "Defaults to the HF_TOKEN environment variable.",
+    )
 
     g_ae = p.add_argument_group("autoencoder (optional)")
     g_ae.add_argument(
@@ -94,6 +99,7 @@ def main():
         hf_config=args.hf_config,
         streaming=args.streaming,
         extra_fields=extra_fields,
+        hf_token=args.hf_token,
     )
     if extra_fields:
         real_images, extra = loaded

@@ -40,6 +40,20 @@ GalSim itself has non-Python dependencies (FFTW, TMV/Eigen) — follow the
 [GalSim install instructions](https://github.com/GalSim-developers/GalSim)
 if `pip install galsim` fails.
 
+### Private Hugging Face datasets
+
+To load a private or gated dataset, set the `HF_TOKEN` environment
+variable to a Hugging Face access token (Settings -> Access Tokens on
+huggingface.co) before running:
+
+```bash
+export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+python run_morphometrics.py --dataset your-org/your-private-dataset ...
+```
+
+`HF_TOKEN` is picked up automatically; alternatively pass `--hf-token` on
+the CLI, or `hf_token=...` to `galmorph.data.load_hf_stamps` directly.
+
 ### R backend (CAS / Gini-M20 / MID)
 
 These indicators call into R via `rpy2`. You need:
