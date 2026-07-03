@@ -97,6 +97,28 @@ a minimal `Autoencoder` interface (`encode`/`decode`) plus:
 - `TFHubVAEAutoencoder`: wraps a TF1-style TF-Hub encoder/decoder module
   pair, compatible with `modules/vae_16/{encoder,decoder}` from
   deep_galaxy_models (needs `tensorflow` + `tensorflow_hub`).
+- `WandBGalaxyAutoencoder`: downloads a JAX/Equinox galaxy autoencoder
+  checkpoint + config from a Weights & Biases run and reconstructs images
+  by encode -> decode -> **reconvolve with the object's own PSF**, matching
+  the training/eval convention (real stamps are PSF-convolved, so
+  reconstructions must be too before comparing statistics). Requires
+  `equinox`, `jax`, `wandb`, `pyyaml` and your own `pshear` package.
+
+  ```bash
+  python run_morphometrics.py \
+      --dataset your-org/your-dataset --image-field sci_subtracted \
+      --psf-field psf_stamp --n-samples 2000 --stamp-size 64 \
+      --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder \
+      --encoder-path entity/project/run_id --decoder-path 1400 \
+      --out-dir results
+  ```
+
+  (`--encoder-path`/`--decoder-path` double up as the WandB run path and
+  checkpoint epoch here — see the class docstring.) `--psf-field` is
+  required for this autoencoder: it loads a per-object PSF stamp
+  alongside the image (fitted to `--stamp-size` the same way), which
+  `WandBGalaxyAutoencoder.reconstruct` needs to reconvolve the decoded
+  image before statistics are computed on it.
 
 To plug in your own pretrained model (a Hugging Face model, a PyTorch
 checkpoint, etc.), subclass `Autoencoder` in a small module of your own and

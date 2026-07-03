@@ -57,6 +57,13 @@ def parse_args():
         help="Auth token for private/gated Hugging Face datasets. "
              "Defaults to the HF_TOKEN environment variable.",
     )
+    g_data.add_argument(
+        "--psf-field", default=None,
+        help="Optional per-object PSF stamp column, fitted to --stamp-size "
+             "like --image-field. Needed by autoencoders (e.g. "
+             "WandBGalaxyAutoencoder) that reconvolve their reconstruction "
+             "with the PSF before statistics are computed on it.",
+    )
 
     g_ae = p.add_argument_group("autoencoder (optional)")
     g_ae.add_argument(
@@ -100,13 +107,16 @@ def main():
         streaming=args.streaming,
         extra_fields=extra_fields,
         hf_token=args.hf_token,
+        psf_field=args.psf_field,
     )
-    if extra_fields:
+    if extra_fields or args.psf_field:
         real_images, extra = loaded
-        binning_values = {"real": extra[args.binning_field]}
+        binning_values = {"real": extra[args.binning_field]} if args.binning_field else None
+        psf_images = extra["psf"] if args.psf_field else None
     else:
         real_images = loaded
         binning_values = None
+        psf_images = None
     print("Loaded %d postage stamps of size %dx%d" % (len(real_images), args.stamp_size, args.stamp_size))
 
     datasets = {"real": real_images}
@@ -115,7 +125,8 @@ def main():
     if args.autoencoder:
         print("Reconstructing images with %s" % args.autoencoder)
         ae = build_autoencoder(args.autoencoder, args.encoder_path, args.decoder_path)
-        datasets["reconstruction"] = ae.reconstruct(real_images)
+        recon_kwargs = {"psf": psf_images} if psf_images is not None else {}
+        datasets["reconstruction"] = ae.reconstruct(real_images, **recon_kwargs)
         reference_name = "real"
         if binning_values:
             binning_values["reconstruction"] = binning_values["real"]

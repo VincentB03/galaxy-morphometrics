@@ -18,6 +18,7 @@ def load_hf_stamps(
     seed=0,
     extra_fields=None,
     hf_token=None,
+    psf_field=None,
 ):
     """
     Loads images from a Hugging Face dataset and turns them into a stack of
@@ -61,11 +62,18 @@ def load_hf_stamps(
     hf_token: str, optional
         Auth token used to access private/gated Hugging Face datasets.
         Defaults to the `HF_TOKEN` environment variable.
+    psf_field: str, optional
+        Name of a column holding a per-object PSF stamp. When given, it is
+        fitted to `stamp_size` the same way as `image_field` and returned
+        under the `"psf"` key of the `extra` dict (forcing the `(stamps,
+        extra)` return form even if `extra_fields` is not given) — used to
+        reconvolve autoencoder reconstructions before computing statistics
+        on them.
 
     Returns
     -------
     numpy.ndarray, shape (N, stamp_size, stamp_size)
-        Or `(stamps, extra)` if `extra_fields` is given.
+        Or `(stamps, extra)` if `extra_fields` and/or `psf_field` is given.
     """
     from datasets import load_dataset
 
@@ -82,6 +90,8 @@ def load_hf_stamps(
 
     stamps = []
     extra = {f: [] for f in (extra_fields or [])}
+    if psf_field:
+        extra["psf"] = []
     for example in ds:
         img = _to_array(example[image_field])
         img = _collapse_channels(img, to_grayscale)
@@ -89,12 +99,15 @@ def load_hf_stamps(
             img = normalize(img)
         img = _fit_to_stamp(img, stamp_size)
         stamps.append(img)
-        for f in extra:
+        if psf_field:
+            psf = _fit_to_stamp(_collapse_channels(_to_array(example[psf_field]), to_grayscale), stamp_size)
+            extra["psf"].append(psf)
+        for f in (extra_fields or []):
             extra[f].append(example[f])
 
     stamps = np.stack(stamps).astype(np.float64)
-    if extra_fields:
-        return stamps, {k: np.asarray(v) for k, v in extra.items()}
+    if extra_fields or psf_field:
+        return stamps, {k: (np.stack(v) if k == "psf" else np.asarray(v)) for k, v in extra.items()}
     return stamps
 
 

@@ -17,3 +17,10 @@ rpy2
 # your own galmorph.autoencoder.Autoencoder subclass instead).
 # tensorflow>=1.15,<2  # or tensorflow>=2 with tf.compat.v1
 # tensorflow_hub
+
+# Only needed for the bundled WandBGalaxyAutoencoder.
+# equinox
+# jax
+# wandb
+# pyyaml
+# pshear  # your own package, install from its repo (pip/git)
