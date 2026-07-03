@@ -122,7 +122,8 @@ a minimal `Autoencoder` interface (`encode`/`decode`) plus:
   (`--encoder-path`/`--decoder-path` double up as the WandB run path and
   checkpoint epoch here — see the class docstring.) `--psf-field` is
   required for this autoencoder: it loads a per-object PSF stamp
-  alongside the image (fitted to `--stamp-size` the same way), which
+  alongside the image, kept at its native size (not resized to
+  `--stamp-size` — the convolution step handles the size mismatch), which
   `WandBGalaxyAutoencoder.reconstruct` needs to reconvolve the decoded
   image before statistics are computed on it.
 

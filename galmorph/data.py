@@ -64,11 +64,13 @@ def load_hf_stamps(
         Defaults to the `HF_TOKEN` environment variable.
     psf_field: str, optional
         Name of a column holding a per-object PSF stamp. When given, it is
-        fitted to `stamp_size` the same way as `image_field` and returned
-        under the `"psf"` key of the `extra` dict (forcing the `(stamps,
-        extra)` return form even if `extra_fields` is not given) — used to
-        reconvolve autoencoder reconstructions before computing statistics
-        on them.
+        kept at its native size (not cropped/padded to `stamp_size` — PSF
+        stamps are typically much smaller than the science stamp, and the
+        convolution step is expected to handle the size mismatch itself)
+        and returned under the `"psf"` key of the `extra` dict (forcing
+        the `(stamps, extra)` return form even if `extra_fields` is not
+        given) — used to reconvolve autoencoder reconstructions before
+        computing statistics on them.
 
     Returns
     -------
@@ -100,7 +102,7 @@ def load_hf_stamps(
         img = _fit_to_stamp(img, stamp_size)
         stamps.append(img)
         if psf_field:
-            psf = _fit_to_stamp(_collapse_channels(_to_array(example[psf_field]), to_grayscale), stamp_size)
+            psf = _collapse_channels(_to_array(example[psf_field]), to_grayscale)
             extra["psf"].append(psf)
         for f in (extra_fields or []):
             extra[f].append(example[f])
