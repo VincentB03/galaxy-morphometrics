@@ -23,4 +23,5 @@ rpy2
 # jax
 # wandb
 # pyyaml
-# pshear  # your own package, install from its repo (pip/git)
+#jax_galsim
+# pshear  # see ReadME
