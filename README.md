@@ -102,7 +102,13 @@ a minimal `Autoencoder` interface (`encode`/`decode`) plus:
   by encode -> decode -> **reconvolve with the object's own PSF**, matching
   the training/eval convention (real stamps are PSF-convolved, so
   reconstructions must be too before comparing statistics). Requires
-  `equinox`, `jax`, `wandb`, `pyyaml` and your own `pshear` package.
+  `equinox`, `jax`, `wandb`, `pyyaml` and your own `pshear` package:
+
+  ```bash
+  # pshear lives in a private repo; requires a GitHub access token
+  pip install "git+https://${GITHUB_TOKEN}@github.com/VincentB03/Train-AE.git"
+  # add #subdirectory=pshear if the package isn't at the repo root
+  ```
 
   ```bash
   python run_morphometrics.py \
