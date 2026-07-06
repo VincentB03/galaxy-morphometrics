@@ -19,6 +19,7 @@ def load_hf_stamps(
     extra_fields=None,
     hf_token=None,
     psf_field=None,
+    noise_map_field=None,
 ):
     """
     Loads images from a Hugging Face dataset and turns them into a stack of
@@ -71,11 +72,20 @@ def load_hf_stamps(
         the `(stamps, extra)` return form even if `extra_fields` is not
         given) — used to reconvolve autoencoder reconstructions before
         computing statistics on them.
+    noise_map_field: str, optional
+        Name of a column holding a per-pixel noise map (e.g. the pixel
+        noise standard deviation, aligned with `image_field`). Fit to
+        `stamp_size` the same way as the science image and returned under
+        the `"noise_map"` key of the `extra` dict (forcing the `(stamps,
+        extra)` return form even if `extra_fields` is not given) — used by
+        `add_noise` to give otherwise noiseless images (e.g. autoencoder
+        reconstructions) a realistic per-pixel noise realization.
 
     Returns
     -------
     numpy.ndarray, shape (N, stamp_size, stamp_size)
-        Or `(stamps, extra)` if `extra_fields` and/or `psf_field` is given.
+        Or `(stamps, extra)` if `extra_fields`, `psf_field` and/or
+        `noise_map_field` is given.
     """
     from datasets import load_dataset
 
@@ -94,6 +104,8 @@ def load_hf_stamps(
     extra = {f: [] for f in (extra_fields or [])}
     if psf_field:
         extra["psf"] = []
+    if noise_map_field:
+        extra["noise_map"] = []
     for example in ds:
         img = _to_array(example[image_field])
         img = _collapse_channels(img, to_grayscale)
@@ -104,13 +116,51 @@ def load_hf_stamps(
         if psf_field:
             psf = _collapse_channels(_to_array(example[psf_field]), to_grayscale)
             extra["psf"].append(psf)
+        if noise_map_field:
+            noise_map = _collapse_channels(_to_array(example[noise_map_field]), to_grayscale)
+            extra["noise_map"].append(_fit_to_stamp(noise_map, stamp_size))
         for f in (extra_fields or []):
             extra[f].append(example[f])
 
     stamps = np.stack(stamps).astype(np.float64)
-    if extra_fields or psf_field:
-        return stamps, {k: (np.stack(v) if k == "psf" else np.asarray(v)) for k, v in extra.items()}
+    if extra_fields or psf_field or noise_map_field:
+        return stamps, {k: (np.stack(v) if k in ("psf", "noise_map") else np.asarray(v)) for k, v in extra.items()}
     return stamps
+
+
+def add_noise(images, noise_map, seed=None):
+    """
+    Adds a white-noise realization to `images`, scaled by a per-pixel
+    `noise_map` (e.g. the `"noise_map"` stamps returned by
+    `load_hf_stamps`).
+
+    This is meant for otherwise noiseless images, such as autoencoder
+    reconstructions: the CAS/Gini-M20/MID indicators (`galmorph.stats.
+    morph_stats`) estimate their segmentation threshold and S/N from the
+    background pixel scatter, which is degenerate on a noise-free image, so
+    reconstructions need a realistic noise realization before those
+    statistics are meaningful to compare against the real images.
+
+    Parameters
+    ----------
+    images: array_like, shape (N, H, W)
+    noise_map: array_like, shape (N, H, W)
+        Per-pixel noise standard deviation, aligned with `images`.
+    seed: int, optional
+        Seed for the white noise draw, for reproducibility.
+
+    Returns
+    -------
+    numpy.ndarray, shape (N, H, W)
+    """
+    images = np.asarray(images)
+    noise_map = np.asarray(noise_map)
+    if noise_map.shape != images.shape:
+        raise ValueError(
+            "noise_map and images must have the same shape (%r vs %r)" % (noise_map.shape, images.shape)
+        )
+    rng = np.random.default_rng(seed)
+    return images + rng.standard_normal(images.shape) * noise_map
 
 
 def _to_array(img):

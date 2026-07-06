@@ -30,7 +30,7 @@ import os
 import numpy as np
 from astropy.table import Table
 
-from galmorph.data import load_hf_stamps
+from galmorph.data import add_noise, load_hf_stamps
 from galmorph.pipeline import compute_statistics
 from galmorph.plotting import make_all_plots
 
@@ -63,6 +63,20 @@ def parse_args():
              "like --image-field. Needed by autoencoders (e.g. "
              "WandBGalaxyAutoencoder) that reconvolve their reconstruction "
              "with the PSF before statistics are computed on it.",
+    )
+    g_data.add_argument(
+        "--noise-map-field", default=None,
+        help="Optional per-object noise map column (per-pixel noise "
+             "standard deviation), fitted to --stamp-size like "
+             "--image-field. When given together with --autoencoder, white "
+             "noise scaled by this map is added to the reconstructed "
+             "images, since they otherwise come out noise-free and the "
+             "CAS/Gini-M20/MID indicators need a realistic S/N to be "
+             "meaningful.",
+    )
+    g_data.add_argument(
+        "--noise-seed", type=int, default=0,
+        help="Seed for the white noise draw used by --noise-map-field.",
     )
 
     g_ae = p.add_argument_group("autoencoder (optional)")
@@ -108,15 +122,18 @@ def main():
         extra_fields=extra_fields,
         hf_token=args.hf_token,
         psf_field=args.psf_field,
+        noise_map_field=args.noise_map_field,
     )
-    if extra_fields or args.psf_field:
+    if extra_fields or args.psf_field or args.noise_map_field:
         real_images, extra = loaded
         binning_values = {"real": extra[args.binning_field]} if args.binning_field else None
         psf_images = extra["psf"] if args.psf_field else None
+        noise_map = extra["noise_map"] if args.noise_map_field else None
     else:
         real_images = loaded
         binning_values = None
         psf_images = None
+        noise_map = None
     print("Loaded %d postage stamps of size %dx%d" % (len(real_images), args.stamp_size, args.stamp_size))
 
     datasets = {"real": real_images}
@@ -127,6 +144,9 @@ def main():
         ae = build_autoencoder(args.autoencoder, args.encoder_path, args.decoder_path)
         recon_kwargs = {"psf": psf_images} if psf_images is not None else {}
         datasets["reconstruction"] = ae.reconstruct(real_images, **recon_kwargs)
+        if noise_map is not None:
+            print("Adding white noise scaled by --noise-map-field to the reconstruction")
+            datasets["reconstruction"] = add_noise(datasets["reconstruction"], noise_map, seed=args.noise_seed)
         reference_name = "real"
         if binning_values:
             binning_values["reconstruction"] = binning_values["real"]

@@ -127,6 +127,32 @@ a minimal `Autoencoder` interface (`encode`/`decode`) plus:
   `WandBGalaxyAutoencoder.reconstruct` needs to reconvolve the decoded
   image before statistics are computed on it.
 
+#### Adding noise to reconstructions
+
+Autoencoder reconstructions come out noise-free, but the CAS/Gini-M20/MID
+indicators (`galmorph/r_indicators/`) estimate their segmentation
+threshold and S/N from the background pixel scatter — degenerate on a
+noise-free image, and not comparable to the real images' own S/N. Pass
+`--noise-map-field` to add a white-noise realization, scaled by a
+per-object noise map column from the dataset (per-pixel noise standard
+deviation, fit to `--stamp-size` like `--image-field`), to the
+reconstruction before statistics are computed on it:
+
+```bash
+python run_morphometrics.py \
+    --dataset your-org/your-dataset --image-field sci_subtracted \
+    --psf-field psf_stamp --noise-map-field noise_map \
+    --n-samples 2000 --stamp-size 64 \
+    --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder \
+    --encoder-path entity/project/run_id --decoder-path 1400 \
+    --out-dir results
+```
+
+`--noise-seed` (default `0`) seeds the noise draw for reproducibility. The
+"real" images are left untouched — they already carry their own noise.
+Use `galmorph.data.add_noise(images, noise_map, seed=...)` directly if
+you're calling the library instead of the CLI.
+
 To plug in your own pretrained model (a Hugging Face model, a PyTorch
 checkpoint, etc.), subclass `Autoencoder` in a small module of your own and
 point `--autoencoder` at it, e.g.:
