@@ -144,7 +144,6 @@ class WandBGalaxyAutoencoder(Autoencoder):
 
         import equinox as eqx
         import jax
-        import wandb
         import yaml
         from pshear.utils import load_galaxy_autoencoder
 
@@ -158,26 +157,38 @@ class WandBGalaxyAutoencoder(Autoencoder):
         epoch_dir = run_root_dir / ("epoch_%d" % epoch)
         epoch_dir.mkdir(parents=True, exist_ok=True)
 
-        api = wandb.Api()
-        run = api.run(run_path)
-        for file in run.files():
-            remote_basename = Path(file.name).name
-            if remote_basename not in {"config.yaml", checkpoint_fname}:
-                continue
-            dest = run_root_dir / remote_basename if remote_basename == "config.yaml" else epoch_dir / remote_basename
-            if dest.exists():
-                continue
-            downloaded = file.download(root=str(dest.parent), replace=True)
-            downloaded_path = Path(downloaded.name)
-            if downloaded_path != dest:
-                downloaded_path.rename(dest)
-
         config_path = run_root_dir / "config.yaml"
         checkpoint_path = epoch_dir / checkpoint_fname
+
+        # If both files are already cached (e.g. pre-downloaded on a machine
+        # with internet access and copied over), skip the WandB API entirely
+        # so this works on a compute node with no network access at all.
+        if not (config_path.exists() and checkpoint_path.exists()):
+            import wandb
+
+            api = wandb.Api()
+            run = api.run(run_path)
+            for file in run.files():
+                remote_basename = Path(file.name).name
+                if remote_basename not in {"config.yaml", checkpoint_fname}:
+                    continue
+                dest = (
+                    run_root_dir / remote_basename
+                    if remote_basename == "config.yaml"
+                    else epoch_dir / remote_basename
+                )
+                if dest.exists():
+                    continue
+                downloaded = file.download(root=str(dest.parent), replace=True)
+                downloaded_path = Path(downloaded.name)
+                if downloaded_path != dest:
+                    downloaded_path.rename(dest)
+
         missing = [p for p in (config_path, checkpoint_path) if not p.exists()]
         if missing:
             raise FileNotFoundError(
-                "Missing files after download: %s (check that run %r contains them)"
+                "Missing files: %s (check that run %r contains them, or that "
+                "--cache-dir points at a pre-populated cache when offline)"
                 % (", ".join(str(p) for p in missing), run_path)
             )
 
