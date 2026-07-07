@@ -184,7 +184,7 @@ class WandBGalaxyAutoencoder(Autoencoder):
         shutil.copy(config_path, epoch_dir / "config.yaml")
         patched_config_path = epoch_dir / "config.yaml"
         with open(patched_config_path) as f:
-            cfg = _unwrap_wandb_config(yaml.safe_load(f))
+            cfg = _unwrap_wandb_config(yaml.full_load(f))
         with open(patched_config_path, "w") as f:
             yaml.dump(cfg, f)
 
