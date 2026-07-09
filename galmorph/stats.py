@@ -8,8 +8,17 @@ import numpy as np
 import pandas as pd
 import galsim
 from astropy.table import Table
+from scipy.ndimage import median_filter
 
 R_INDICATORS_DIR = os.path.join(os.path.dirname(__file__), "r_indicators")
+
+# Columns returned by the R `compute_statistics_single` routine, used to
+# build a placeholder row for stamps skipped in `morph_stats` because too
+# much of them is masked (see `max_masked_frac`).
+_MORPH_COLUMNS = [
+    "M_level", "M", "M_level_o", "M_o", "M_level_p", "M_p",
+    "I", "D", "axmax", "axmin", "angle", "sn", "size", "Gini", "M20", "C", "A",
+]
 
 
 def _as_stack(images):
@@ -25,7 +34,19 @@ def _as_stack(images):
     return images
 
 
-def moments(images, scale=0.03, stamp_size=None):
+def _as_mask_stack(masks, images):
+    """Normalizes an optional bad-pixel mask to match `images`'s (N, H, W)
+    shape. Any nonzero value marks a bad pixel (e.g. a cosmic ray hit or
+    other detector defect)."""
+    if masks is None:
+        return None
+    masks = _as_stack(np.asarray(masks))
+    if masks.shape != images.shape:
+        raise ValueError("masks and images must have the same shape (%r vs %r)" % (masks.shape, images.shape))
+    return masks
+
+
+def moments(images, scale=0.03, stamp_size=None, masks=None):
     """
     Computes HSM adaptive moments for a stack of images.
 
@@ -38,6 +59,12 @@ def moments(images, scale=0.03, stamp_size=None):
     stamp_size: int, optional
         Size of the postage stamp, used as the centroid guess. Defaults to
         the image size.
+    masks: array_like, shape (N, H, W), optional
+        Bad-pixel masks aligned with `images` (nonzero = bad pixel, e.g. a
+        cosmic ray hit). When given, bad pixels are excluded from the HSM
+        fit via GalSim's `badpix` argument, instead of being treated as
+        real zero flux -- which would otherwise bias the measured size and
+        ellipticity.
 
     Returns
     -------
@@ -47,12 +74,17 @@ def moments(images, scale=0.03, stamp_size=None):
     images = _as_stack(images)
     if stamp_size is None:
         stamp_size = images.shape[-1]
+    masks = _as_mask_stack(masks, images)
 
     sigma, e, e1, e2, g, g1, g2, flag, amp, rho4 = ([] for _ in range(10))
 
     for i in range(len(images)):
         image = galsim.Image(np.ascontiguousarray(images[i], dtype=np.float64), scale=scale)
+        badpix = None
+        if masks is not None:
+            badpix = galsim.Image(np.ascontiguousarray(masks[i] != 0, dtype=np.int16), scale=scale)
         shape = image.FindAdaptiveMom(
+            badpix=badpix,
             guess_centroid=galsim.PositionD(stamp_size // 2, stamp_size // 2),
             strict=False,
         )
@@ -83,7 +115,19 @@ def moments(images, scale=0.03, stamp_size=None):
     )
 
 
-def morph_stats(images):
+def _fill_masked(image, bad, size=5):
+    """Fills masked pixels with the median of their local neighborhood.
+
+    This is only a plausible local estimate, not the true pixel value -- it
+    exists because the R statistics below have no notion of missing data
+    and would otherwise see a sharp zero-flux hole, which biases
+    Gini/M20/Asymmetry/Multimode more than a smooth local estimate does.
+    """
+    filled = median_filter(image, size=size)
+    return np.where(bad, filled, image)
+
+
+def morph_stats(images, masks=None, max_masked_frac=0.05):
     """
     Computes CAS (Concentration, Asymmetry, Smoothness), Gini/M20 and MID
     (Multimode, Intensity, Deviation) morphological indicators using the R
@@ -96,6 +140,21 @@ def morph_stats(images):
     images: array_like, shape (N, H, W)
         Postage stamps. For best results, crop to the galaxy-centered
         region (the original paper uses 64x64 stamps cropped from 128x128).
+    masks: array_like, shape (N, H, W), optional
+        Bad-pixel masks aligned with `images` (nonzero = bad pixel). The R
+        routines have no notion of missing data, so masked pixels are
+        filled in with a local median estimate before the statistics are
+        computed (see `_fill_masked`), rather than left at the raw zero
+        value in `images` -- which would otherwise read as spurious
+        structure to the Asymmetry/Multimode/Gini/M20 indicators. Stamps
+        with a masked fraction above `max_masked_frac` are skipped entirely
+        (flagged False) instead of being measured on mostly fabricated
+        data.
+    max_masked_frac: float
+        Maximum fraction of masked pixels tolerated per stamp before it is
+        skipped rather than filled in. Ignored if `masks` is None. Matches
+        the R routine's own tolerance for zero-valued pixels (see the
+        `which(img == 0, ...)` check in `compute_statistics_single`).
 
     Returns
     -------
@@ -113,11 +172,22 @@ def morph_stats(images):
     numpy2ri.activate()
 
     images = _as_stack(images)
+    masks = _as_mask_stack(masks, images)
 
     flag = []
     rows = []
     for i in range(len(images)):
         im = np.ascontiguousarray(images[i], dtype=np.float64)
+
+        if masks is not None:
+            bad = masks[i] != 0
+            if bad.mean() > max_masked_frac:
+                flag.append(False)
+                rows.append(pd.DataFrame([dict.fromkeys(_MORPH_COLUMNS, -9.0)]))
+                continue
+            if bad.any():
+                im = _fill_masked(im, bad)
+
         ret = compute_statistics_single(im)
         flag.append(bool(ret[0][0]))
         with localconverter(ro.default_converter + pandas2ri.converter):

@@ -20,6 +20,7 @@ def load_hf_stamps(
     hf_token=None,
     psf_field=None,
     noise_map_field=None,
+    mask_field=None,
 ):
     """
     Loads images from a Hugging Face dataset and turns them into a stack of
@@ -80,12 +81,23 @@ def load_hf_stamps(
         extra)` return form even if `extra_fields` is not given) — used by
         `add_noise` to give otherwise noiseless images (e.g. autoencoder
         reconstructions) a realistic per-pixel noise realization.
+    mask_field: str, optional
+        Name of a column holding a per-pixel bad-pixel mask (nonzero = bad,
+        e.g. a cosmic ray hit or other detector defect), aligned with
+        `image_field`. Fit to `stamp_size` the same way as the science
+        image, except that padding added outside the original stamp is
+        filled with 1 (bad/no data) rather than 0. Returned under the
+        `"mask"` key of the `extra` dict (forcing the `(stamps, extra)`
+        return form even if `extra_fields` is not given) — pass it as the
+        corresponding entry of `galmorph.pipeline.compute_statistics`'s
+        `masks` argument so masked pixels are excluded/estimated instead of
+        trusted as real zero flux.
 
     Returns
     -------
     numpy.ndarray, shape (N, stamp_size, stamp_size)
-        Or `(stamps, extra)` if `extra_fields`, `psf_field` and/or
-        `noise_map_field` is given.
+        Or `(stamps, extra)` if `extra_fields`, `psf_field`, `noise_map_field`
+        and/or `mask_field` is given.
     """
     from datasets import load_dataset
 
@@ -106,6 +118,8 @@ def load_hf_stamps(
         extra["psf"] = []
     if noise_map_field:
         extra["noise_map"] = []
+    if mask_field:
+        extra["mask"] = []
     for example in ds:
         img = _to_array(example[image_field])
         img = _collapse_channels(img, to_grayscale)
@@ -119,12 +133,17 @@ def load_hf_stamps(
         if noise_map_field:
             noise_map = _collapse_channels(_to_array(example[noise_map_field]), to_grayscale)
             extra["noise_map"].append(_fit_to_stamp(noise_map, stamp_size))
+        if mask_field:
+            mask = _collapse_channels(_to_array(example[mask_field]), to_grayscale)
+            extra["mask"].append(_fit_to_stamp(mask, stamp_size, fill=1.0))
         for f in (extra_fields or []):
             extra[f].append(example[f])
 
     stamps = np.stack(stamps).astype(np.float64)
-    if extra_fields or psf_field or noise_map_field:
-        return stamps, {k: (np.stack(v) if k in ("psf", "noise_map") else np.asarray(v)) for k, v in extra.items()}
+    if extra_fields or psf_field or noise_map_field or mask_field:
+        return stamps, {
+            k: (np.stack(v) if k in ("psf", "noise_map", "mask") else np.asarray(v)) for k, v in extra.items()
+        }
     return stamps
 
 
@@ -179,10 +198,12 @@ def _collapse_channels(img, mode):
     raise ValueError("Unknown to_grayscale mode: %r" % mode)
 
 
-def _fit_to_stamp(img, stamp_size):
-    """Center-crops or zero-pads a 2D image to (stamp_size, stamp_size)."""
+def _fit_to_stamp(img, stamp_size, fill=0.0):
+    """Center-crops or pads a 2D image to (stamp_size, stamp_size), filling
+    any padding with `fill` (0 for science/noise images, 1 -- "bad/no data"
+    -- for masks)."""
     h, w = img.shape
-    out = np.zeros((stamp_size, stamp_size), dtype=img.dtype)
+    out = np.full((stamp_size, stamp_size), fill, dtype=img.dtype)
 
     src_y0 = max(0, (h - stamp_size) // 2)
     src_x0 = max(0, (w - stamp_size) // 2)

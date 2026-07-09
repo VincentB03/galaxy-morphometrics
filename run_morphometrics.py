@@ -78,6 +78,15 @@ def parse_args():
         "--noise-seed", type=int, default=0,
         help="Seed for the white noise draw used by --noise-map-field.",
     )
+    g_data.add_argument(
+        "--mask-field", default=None,
+        help="Optional per-object bad-pixel mask column (nonzero = bad "
+             "pixel, e.g. cosmic rays or other detector defects), fitted "
+             "to --stamp-size like --image-field. When given, masked "
+             "pixels are excluded from the HSM moments fit and locally "
+             "interpolated (or the stamp skipped) for the CAS/Gini-M20/MID "
+             "indicators, instead of being trusted as real zero flux.",
+    )
 
     g_ae = p.add_argument_group("autoencoder (optional)")
     g_ae.add_argument(
@@ -123,20 +132,24 @@ def main():
         hf_token=args.hf_token,
         psf_field=args.psf_field,
         noise_map_field=args.noise_map_field,
+        mask_field=args.mask_field,
     )
-    if extra_fields or args.psf_field or args.noise_map_field:
+    if extra_fields or args.psf_field or args.noise_map_field or args.mask_field:
         real_images, extra = loaded
         binning_values = {"real": extra[args.binning_field]} if args.binning_field else None
         psf_images = extra["psf"] if args.psf_field else None
         noise_map = extra["noise_map"] if args.noise_map_field else None
+        real_masks = extra["mask"] if args.mask_field else None
     else:
         real_images = loaded
         binning_values = None
         psf_images = None
         noise_map = None
+        real_masks = None
     print("Loaded %d postage stamps of size %dx%d" % (len(real_images), args.stamp_size, args.stamp_size))
 
     datasets = {"real": real_images}
+    masks = {"real": real_masks} if real_masks is not None else None
     reference_name = None
 
     if args.autoencoder:
@@ -158,6 +171,7 @@ def main():
         morph_crop=args.morph_crop,
         pool_size=args.pool_size,
         compute_morph=not args.skip_r,
+        masks=masks,
     )
 
     for name, table in tables.items():
