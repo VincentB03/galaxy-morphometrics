@@ -82,16 +82,21 @@ def load_hf_stamps(
         `add_noise` to give otherwise noiseless images (e.g. autoencoder
         reconstructions) a realistic per-pixel noise realization.
     mask_field: str, optional
-        Name of a column holding a per-pixel bad-pixel mask (nonzero = bad,
-        e.g. a cosmic ray hit or other detector defect), aligned with
-        `image_field`. Fit to `stamp_size` the same way as the science
-        image, except that padding added outside the original stamp is
-        filled with 1 (bad/no data) rather than 0. Returned under the
+        Name of a column holding a per-pixel validity mask aligned with
+        `image_field`, using the dataset's own convention: 1 = valid
+        pixel, 0 = defective/corrupted pixel (e.g. a cosmic ray hit or
+        other detector defect). Fit to `stamp_size` the same way as the
+        science image, with padding added outside the original stamp
+        treated as defective (0). Before being returned, the mask is
+        flipped to the opposite convention -- nonzero = bad pixel -- since
+        that is what `galmorph.stats.moments`/`morph_stats` expect and
+        what GalSim's own `badpix` argument requires; this flip is handled
+        here so callers never have to think about it. Returned under the
         `"mask"` key of the `extra` dict (forcing the `(stamps, extra)`
-        return form even if `extra_fields` is not given) — pass it as the
+        return form even if `extra_fields` is not given) -- pass it as the
         corresponding entry of `galmorph.pipeline.compute_statistics`'s
-        `masks` argument so masked pixels are excluded/estimated instead of
-        trusted as real zero flux.
+        `masks` argument so defective pixels are excluded/estimated
+        instead of trusted as real zero flux.
 
     Returns
     -------
@@ -134,8 +139,9 @@ def load_hf_stamps(
             noise_map = _collapse_channels(_to_array(example[noise_map_field]), to_grayscale)
             extra["noise_map"].append(_fit_to_stamp(noise_map, stamp_size))
         if mask_field:
-            mask = _collapse_channels(_to_array(example[mask_field]), to_grayscale)
-            extra["mask"].append(_fit_to_stamp(mask, stamp_size, fill=1.0))
+            valid = _collapse_channels(_to_array(example[mask_field]), to_grayscale)
+            valid = _fit_to_stamp(valid, stamp_size, fill=0.0)  # padding = defective, dataset's own convention
+            extra["mask"].append((valid == 0).astype(np.float64))  # flip to nonzero = bad, for stats.py/GalSim
         for f in (extra_fields or []):
             extra[f].append(example[f])
 
