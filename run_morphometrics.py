@@ -44,8 +44,8 @@ def parse_args():
     g_data.add_argument("--split", default="train")
     g_data.add_argument("--image-field", default="image")
     g_data.add_argument("--n-samples", type=int, default=2000)
-    g_data.add_argument("--stamp-size", type=int, default=128)
-    g_data.add_argument("--pixel-scale", type=float, default=0.03, help="arcsec/pixel")
+    g_data.add_argument("--stamp-size", type=int, default=64)
+    g_data.add_argument("--pixel-scale", type=float, default=0.1, help="arcsec/pixel")
     g_data.add_argument("--streaming", action="store_true")
     g_data.add_argument(
         "--binning-field", default=None,
