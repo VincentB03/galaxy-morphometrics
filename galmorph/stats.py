@@ -127,7 +127,7 @@ def _fill_masked(image, bad, size=5):
     return np.where(bad, filled, image)
 
 
-def morph_stats(images, masks=None, max_masked_frac=0.05):
+def morph_stats(images, masks=None, max_masked_frac=0.10):
     """
     Computes CAS (Concentration, Asymmetry, Smoothness), Gini/M20 and MID
     (Multimode, Intensity, Deviation) morphological indicators using the R
@@ -152,9 +152,7 @@ def morph_stats(images, masks=None, max_masked_frac=0.05):
         data.
     max_masked_frac: float
         Maximum fraction of masked pixels tolerated per stamp before it is
-        skipped rather than filled in. Ignored if `masks` is None. Matches
-        the R routine's own tolerance for zero-valued pixels (see the
-        `which(img == 0, ...)` check in `compute_statistics_single`).
+        skipped rather than filled in. Ignored if `masks` is None.
 
     Returns
     -------
