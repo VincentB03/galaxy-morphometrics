@@ -305,6 +305,7 @@ def make_all_plots(
     binning_values=None,
     binning_label="binning quantity",
     reference_name=None,
+    paired_names=None,
     skip_morph=False,
 ):
     """
@@ -322,8 +323,19 @@ def make_all_plots(
         and rho4 against, matching Figure_Moments.ipynb.
     reference_name: str, optional
         If given and present in `tables`, per-object reconstruction-error
-        plots are made between this dataset and every other one (requires
-        index-aligned, same-length tables, e.g. "real" vs "reconstruction").
+        plots are made between this dataset and each of `paired_names`
+        (requires index-aligned, same-length tables, e.g. "real" vs
+        "reconstruction").
+    paired_names: list[str], optional
+        Names of the datasets that are index-aligned with `reference_name`
+        (object i of `tables[name]` is object i of `tables[reference_name]`
+        run through some transformation), and thus eligible for the
+        per-object `paired_reconstruction_error` plots. Defaults to every
+        other dataset in `tables`. Datasets that aren't index-aligned with
+        the reference -- e.g. unconditional samples from a generative model
+        such as `galmorph.autoencoder.WandBGalaxyFlow`, which have no
+        specific real galaxy behind them -- must be excluded here, since
+        for those a matching length is a coincidence, not a correspondence.
     """
     os.makedirs(out_dir, exist_ok=True)
     written = []
@@ -363,9 +375,11 @@ def make_all_plots(
         print("[plotting] morphological (Gini/M20/CAS/MID) columns not found, skipping those plots")
 
     if reference_name is not None and reference_name in tables:
-        for name, tab in tables.items():
-            if name == reference_name:
+        names = paired_names if paired_names is not None else [n for n in tables if n != reference_name]
+        for name in names:
+            if name == reference_name or name not in tables:
                 continue
+            tab = tables[name]
             if len(tab) != len(tables[reference_name]):
                 print("[plotting] %s and %s have different lengths, skipping paired error plots" % (reference_name, name))
                 continue

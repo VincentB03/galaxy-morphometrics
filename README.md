@@ -6,9 +6,10 @@ the comparison plots from
 `deepgal/validation` (Lanusse et al. 2020), applied to your own data instead
 of the COSMOS + GalSim-Hub pipeline the original repo was built around.
 
-Given postage-stamp galaxy images (loaded from a Hugging Face dataset) and,
-optionally, their reconstruction through a pretrained autoencoder, this
-repo computes:
+Given postage-stamp galaxy images (loaded from a Hugging Face dataset),
+optionally their reconstruction through a pretrained autoencoder, and
+optionally unconditional samples from a latent normalizing flow trained on
+that autoencoder's latent space, this repo computes:
 
 - **HSM adaptive moments** (GalSim `FindAdaptiveMom`): size `sigma_e`,
   ellipticity `e`/`e1`/`e2`/`g`/`g1`/`g2`, `rho4`, flux `amp`.
@@ -18,8 +19,9 @@ repo computes:
 
 ...and renders the same kind of plots as the paper: ellipticity/size
 distributions, `rho4` vs magnitude/size, Gini-M20, M-I, M-D, MID
-distributions, and (when a reference/reconstruction pair is available)
-per-object reconstruction error plots.
+distributions (one curve per named dataset — real, reconstruction,
+flow_prior, or any others you add), and (when a reference/reconstruction
+pair is available) per-object reconstruction error plots.
 
 ## Origin
 
@@ -153,6 +155,35 @@ python run_morphometrics.py \
 Use `galmorph.data.add_noise(images, noise_map, seed=...)` directly if
 you're calling the library instead of the CLI.
 
+#### Flow prior sampling (optional)
+
+A latent normalizing flow fit to `WandBGalaxyAutoencoder`'s latent space
+(Train-AE's `experiments/train_flow.py`) should, if it has learned that
+space correctly, reproduce the real data's morphometric distribution when
+its samples are decoded. Pass `--flow-run` to check this: it adds a third
+`flow_prior` dataset — unconditional samples z ~ flow, decoded through the
+*same* autoencoder as `--autoencoder` and reconvolved with PSFs resampled
+from the real dataset (a flow sample has no real galaxy, and therefore no
+PSF, of its own) — so every distribution plot shows real vs reconstruction
+vs flow_prior. The per-object reconstruction-error plots are unaffected:
+`flow_prior` isn't index-aligned with "real" and is never included there.
+
+```bash
+python run_morphometrics.py \
+    --dataset your-org/your-dataset --image-field sci_subtracted \
+    --psf-field psf_stamp --n-samples 2000 --stamp-size 64 \
+    --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder \
+    --encoder-path entity/project/ae_run_id --decoder-path 1400 \
+    --flow-run entity/project/flow_run_id --flow-epoch 500 \
+    --out-dir results
+```
+
+Requires `--autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder` and
+`--psf-field`. `--flow-n-samples` defaults to the real dataset's own count;
+`--flow-seed` (default `0`) seeds both the flow draw and the PSF
+resampling. Omit `--flow-run` to skip this curve entirely — everything
+else behaves exactly as before.
+
 To plug in your own pretrained model (a Hugging Face model, a PyTorch
 checkpoint, etc.), subclass `Autoencoder` in a small module of your own and
 point `--autoencoder` at it, e.g.:
@@ -208,20 +239,23 @@ isn't on the Hugging Face Hub), call the pieces directly:
 from galmorph.pipeline import compute_statistics
 from galmorph.plotting import make_all_plots
 
-datasets = {"real": real_stamps, "reconstruction": recon_stamps}
+datasets = {"real": real_stamps, "reconstruction": recon_stamps, "flow_prior": flow_stamps}
 tables = compute_statistics(datasets, pixel_scale=0.03, morph_crop=64)
-make_all_plots(tables, out_dir="results/plots", reference_name="real")
+make_all_plots(
+    tables, out_dir="results/plots",
+    reference_name="real", paired_names=["reconstruction"],  # flow_prior isn't index-aligned with real
+)
 ```
 
 ## Repository layout
 
 ```
-run_morphometrics.py       CLI entry point
+run_morphometrics.py   CLI entry point
 galmorph/
-  data.py                  Hugging Face dataset -> postage stamps
-  autoencoder.py           Autoencoder interface + TF-Hub / identity implementations
-  stats.py                 HSM moments (GalSim) + CAS/Gini-M20/MID (R via rpy2)
-  pipeline.py               Per-dataset / multi-dataset statistics computation
-  plotting.py               All comparison plots
-  r_indicators/             R implementation of CAS/Gini-M20/MID (ported as-is)
+  data.py              Hugging Face dataset -> postage stamps
+  autoencoder.py       Autoencoder interface + TF-Hub / identity / WandB (AE, flow) implementations
+  stats.py             HSM moments (GalSim) + CAS/Gini-M20/MID (R via rpy2)
+  pipeline.py          Per-dataset / multi-dataset statistics computation
+  plotting.py          All comparison plots
+  r_indicators/        R implementation of CAS/Gini-M20/MID (ported as-is)
 ```

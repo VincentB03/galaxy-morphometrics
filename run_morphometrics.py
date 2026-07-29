@@ -8,20 +8,27 @@ Typical workflow:
   1. Load a stack of postage stamps from a Hugging Face image dataset.
   2. Optionally reconstruct them through a pretrained autoencoder
      (implement `galmorph.autoencoder.Autoencoder` for your model).
-  3. Compute statistics for "real" and "reconstruction" (or any other named
-     sets of images you build yourself).
-  4. Save the catalogs and render every comparison plot.
+  3. Optionally add unconditional samples from a latent normalizing flow
+     trained on that autoencoder's latent space (--flow-run), to check
+     whether the flow recovers the real data's distribution.
+  4. Compute statistics for "real", "reconstruction" and "flow_prior" (or
+     any other named sets of images you build yourself).
+  5. Save the catalogs and render every comparison plot.
 
-Example:
+Example, with the optional flow-prior curve:
     python run_morphometrics.py \\
         --dataset your-org/your-galaxy-dataset --split train \\
         --image-field image --n-samples 2000 --stamp-size 128 \\
-        --autoencoder galmorph.autoencoder:TFHubVAEAutoencoder \\
-        --encoder-path modules/vae_16/encoder --decoder-path modules/vae_16/decoder \\
+        --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder \\
+        --encoder-path entity/project/ae_run_id --decoder-path 1400 \\
+        --psf-field psf_stamp \\
+        --flow-run entity/project/flow_run_id --flow-epoch 500 \\
         --out-dir results
 
 Without --autoencoder, only the "real" dataset is analyzed (distribution
-plots only, no reconstruction-error plots).
+plots only, no reconstruction-error plots). --flow-run is optional and
+independent of that choice of --autoencoder class, but only makes sense
+with galmorph.autoencoder:WandBGalaxyAutoencoder (see galmorph/autoencoder.py).
 """
 import argparse
 import importlib
@@ -97,6 +104,30 @@ def parse_args():
     g_ae.add_argument("--encoder-path", default=None, help="Passed as first positional arg to the autoencoder class")
     g_ae.add_argument("--decoder-path", default=None, help="Passed as second positional arg to the autoencoder class")
 
+    g_flow = p.add_argument_group(
+        "flow prior sampling (optional, requires --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder and --psf-field)"
+    )
+    g_flow.add_argument(
+        "--flow-run", default=None,
+        help="wandb 'entity/project/run_id' of a latent normalizing flow trained on --autoencoder's "
+             "latent space (Train-AE's experiments/train_flow.py). When given, draws unconditional "
+             "samples z~flow, decodes them through the SAME autoencoder as --autoencoder (not a "
+             "separate download -- the flow only makes sense in that specific latent space), "
+             "reconvolves them with PSFs resampled from the real dataset, and adds the result as a "
+             "third 'flow_prior' dataset/curve on every distribution plot, to check whether the flow "
+             "recovers the real data's morphometric distribution. Omit to skip this curve entirely.",
+    )
+    g_flow.add_argument("--flow-epoch", type=int, default=None, help="Checkpoint epoch for --flow-run")
+    g_flow.add_argument(
+        "--flow-cache-dir", default="wandb_weights",
+        help="Local cache dir for downloaded flow weights (mirrors WandBGalaxyAutoencoder's own cache_dir)",
+    )
+    g_flow.add_argument(
+        "--flow-n-samples", type=int, default=None,
+        help="Number of flow samples to draw (default: same as the real dataset, i.e. --n-samples)",
+    )
+    g_flow.add_argument("--flow-seed", type=int, default=0, help="Seed for flow sampling and PSF resampling")
+
     g_stats = p.add_argument_group("statistics")
     g_stats.add_argument("--pool-size", type=int, default=None, help="Worker processes for stats computation")
     g_stats.add_argument("--morph-crop", type=int, default=None, help="Crop stamps to this size before R stats (e.g. 64)")
@@ -164,6 +195,35 @@ def main():
         if binning_values:
             binning_values["reconstruction"] = binning_values["real"]
 
+    if args.flow_run:
+        if not args.autoencoder:
+            raise ValueError(
+                "--flow-run requires --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder "
+                "(the flow needs that autoencoder's frozen decoder for its own latent space)"
+            )
+        if psf_images is None:
+            raise ValueError("--flow-run requires --psf-field (flow samples need a PSF to be reconvolved with)")
+
+        print("Sampling from flow prior %s (epoch %s)" % (args.flow_run, args.flow_epoch))
+        from galmorph.autoencoder import WandBGalaxyFlow
+
+        flow_sampler = WandBGalaxyFlow(
+            ae, args.flow_run, args.flow_epoch, cache_dir=args.flow_cache_dir, seed=args.flow_seed
+        )
+        n_flow = args.flow_n_samples or len(real_images)
+        # flow samples are unconditional (no real galaxy behind them), so they borrow
+        # a PSF at random from the real dataset rather than one of their own
+        rng = np.random.default_rng(args.flow_seed)
+        flow_idx = rng.integers(0, len(psf_images), size=n_flow)
+        datasets["flow_prior"] = flow_sampler.sample(n_flow, psf_images[flow_idx])
+        if noise_map is not None:
+            print("Adding white noise scaled by --noise-map-field to the flow samples")
+            datasets["flow_prior"] = add_noise(datasets["flow_prior"], noise_map[flow_idx], seed=args.flow_seed)
+
+    # only "reconstruction" is index-aligned with "real" (same galaxy, encoded then decoded);
+    # "flow_prior" draws are unconditional and must not be fed to the per-object paired plots
+    paired_names = ["reconstruction"] if "reconstruction" in datasets else None
+
     print("Computing statistics (moments%s)..." % ("" if args.skip_r else " + CAS/Gini-M20/MID"))
     tables = compute_statistics(
         datasets,
@@ -187,6 +247,7 @@ def main():
         binning_values=binning_values,
         binning_label=args.binning_field or "binning quantity",
         reference_name=reference_name,
+        paired_names=paired_names,
         skip_morph=args.skip_r,
     )
     for path in written:
