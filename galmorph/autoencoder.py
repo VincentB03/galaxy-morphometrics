@@ -291,7 +291,7 @@ class WandBGalaxyFlow:
 
         self._jax = jax
         self._jnp = jax.numpy
-        self._key = jax.random.PRNGKey(seed)
+        self._key = jax.random.key(seed)
         self.ae_model = ae.model
 
         epoch = int(epoch)
