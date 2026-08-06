@@ -127,6 +127,13 @@ def parse_args():
         help="Number of flow samples to draw (default: same as the real dataset, i.e. --n-samples)",
     )
     g_flow.add_argument("--flow-seed", type=int, default=0, help="Seed for flow sampling and PSF resampling")
+    g_flow.add_argument(
+        "--psf-seed", type=int, default=None,
+        help="Seed for PSF resampling only, decoupled from --flow-seed (default: same as "
+             "--flow-seed). Set this independently of --flow-seed to check whether the choice "
+             "of PSF affects the flow_prior statistics, while keeping the flow's own z-samples "
+             "(and the noise draw, if --noise-map-field is set) fixed.",
+    )
 
     g_stats = p.add_argument_group("statistics")
     g_stats.add_argument("--pool-size", type=int, default=None, help="Worker processes for stats computation")
@@ -213,7 +220,8 @@ def main():
         n_flow = args.flow_n_samples or len(real_images)
         # flow samples are unconditional (no real galaxy behind them), so they borrow
         # a PSF at random from the real dataset rather than one of their own
-        rng = np.random.default_rng(args.flow_seed)
+        psf_seed = args.psf_seed if args.psf_seed is not None else args.flow_seed
+        rng = np.random.default_rng(psf_seed)
         flow_idx = rng.integers(0, len(psf_images), size=n_flow)
         datasets["flow_prior"] = flow_sampler.sample(n_flow, psf_images[flow_idx])
         if noise_map is not None:

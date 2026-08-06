@@ -230,6 +230,41 @@ Run `python run_morphometrics.py --help` for the full list of options
 (pixel scale, morphology crop size, worker pool size, an optional
 `--binning-field` catalog column for the magnitude/size-binned plots, ...).
 
+### Sampling and reproducibility
+
+`--n-samples` does not draw a random subset: without `--streaming` it
+takes the **first `n-samples` rows** of the dataset, in its stored order
+(`ds.select(range(n_samples))` in `galmorph/data.py`) — so the same
+`--n-samples` value always loads the exact same images, run after run.
+This selection happens once, before anything else — the autoencoder
+reconstructs whichever stamps were loaded, it doesn't draw its own
+subsample — so "real" and "reconstruction" are always built from the
+*same* `n-samples` objects. (With `--streaming`, a shuffle is applied
+first, with a seed currently hardcoded to `0` inside `load_hf_stamps` and
+not exposed on the CLI — still deterministic run to run, just not "the
+first N rows" anymore.)
+
+`--flow-seed` (default `0`, used when `--flow-run` is set) seeds three
+things at once: the flow's own `z` draw (i.e. which galaxies get
+generated), which real-dataset PSF gets resampled onto each flow sample,
+and — if `--noise-map-field` is set — the noise realization added to
+them. Changing `--flow-seed` alone therefore moves all three together, so
+a shift in the `flow_prior` statistics can't be attributed to any one of
+them. To check specifically whether the PSF draw affects the results, use
+`--psf-seed` to vary *only* the PSF resampling while `--flow-seed` (and
+so the flow's `z` draw and the noise) stays fixed:
+
+```bash
+# same flow samples and noise every time, only the PSF assignment changes
+python run_morphometrics.py ... --flow-seed 0 --psf-seed 1 --out-dir results_psf1
+python run_morphometrics.py ... --flow-seed 0 --psf-seed 2 --out-dir results_psf2
+```
+
+Any difference between the resulting `flow_prior` catalogs/plots now
+isolates the effect of which PSF got used, since everything else was held
+fixed. `--psf-seed` defaults to `--flow-seed` when omitted, so existing
+commands behave exactly as before.
+
 ### Using the library directly
 
 For more control (e.g. comparing more than two datasets, or data that
