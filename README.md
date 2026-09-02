@@ -17,7 +17,7 @@ that autoencoder's latent space, this repo computes:
 - **Gini / M20** — Lotz, Primack & Madau (2004).
 - **MID** (Multimode, Intensity, Deviation) — Freeman et al. (2013).
 
-...and renders the same kind of plots as the paper: ellipticity/size
+...and renders the same kind of plots as the [paper](https://arxiv.org/abs/2008.03833): ellipticity/size
 distributions, `rho4` vs magnitude/size, Gini-M20, M-I, M-D, MID
 distributions (one curve per named dataset — real, reconstruction,
 flow_prior, or any others you add), and (when a reference/reconstruction
