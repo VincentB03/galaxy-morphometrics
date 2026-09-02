@@ -275,7 +275,7 @@ from galmorph.pipeline import compute_statistics
 from galmorph.plotting import make_all_plots
 
 datasets = {"real": real_stamps, "reconstruction": recon_stamps, "flow_prior": flow_stamps}
-tables = compute_statistics(datasets, pixel_scale=0.03, morph_crop=64)
+tables = compute_statistics(datasets, pixel_scale=0.1, morph_crop=64)
 make_all_plots(
     tables, out_dir="results/plots",
     reference_name="real", paired_names=["reconstruction"],  # flow_prior isn't index-aligned with real
