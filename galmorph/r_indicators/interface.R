@@ -5,7 +5,7 @@ source("./compute_GM20.R")
 source("./compute_MID.R")
 
 compute_statistics_single <- function(img,      # 2D image
-                               scale.pix=0.03,    # Pixel scale in arcsec
+                               scale.pix=0.1,     # Pixel scale in arcsec
                                scale.smooth=1,    # Smoothing scale for I and D
                                                   # statistics, in pix
                                eta=0.2,           # Segmentation parameters
@@ -123,7 +123,7 @@ compute_statistics_single <- function(img,      # 2D image
 }
 
 compute_statistics <- function(images,            # 3D array of images
-                               scale.pix=0.03,    # Pixel scale in arcsec
+                               scale.pix=0.1,     # Pixel scale in arcsec
                                scale.smooth=1,    # Smoothing scale for I and D
                                                   # statistics, in pix
                                eta=0.2,           # Segmentation parameters
