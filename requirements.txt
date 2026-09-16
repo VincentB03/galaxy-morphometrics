@@ -13,11 +13,6 @@ datasets
 # CRAN, install from the archive, see README.md).
 rpy2
 
-# Only needed for the bundled TFHubVAEAutoencoder (skip if you implement
-# your own galmorph.autoencoder.Autoencoder subclass instead).
-# tensorflow>=1.15,<2  # or tensorflow>=2 with tf.compat.v1
-# tensorflow_hub
-
 # Only needed for the bundled WandBGalaxyAutoencoder.
 # equinox
 # jax

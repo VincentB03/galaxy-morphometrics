@@ -99,7 +99,7 @@ def parse_args():
     g_ae.add_argument(
         "--autoencoder", default=None,
         help="'module.path:ClassName' of an Autoencoder subclass, "
-             "e.g. galmorph.autoencoder:TFHubVAEAutoencoder",
+             "e.g. galmorph.autoencoder:WandBGalaxyAutoencoder",
     )
     g_ae.add_argument("--encoder-path", default=None, help="Passed as first positional arg to the autoencoder class")
     g_ae.add_argument("--decoder-path", default=None, help="Passed as second positional arg to the autoencoder class")

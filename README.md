@@ -96,9 +96,6 @@ Reconstructing images requires a model. `galmorph/autoencoder.py` defines
 a minimal `Autoencoder` interface (`encode`/`decode`) plus:
 
 - `IdentityAutoencoder`: no-op, useful to sanity-check the pipeline.
-- `TFHubVAEAutoencoder`: wraps a TF1-style TF-Hub encoder/decoder module
-  pair, compatible with `modules/vae_16/{encoder,decoder}` from
-  deep_galaxy_models (needs `tensorflow` + `tensorflow_hub`).
 - `WandBGalaxyAutoencoder`: downloads a JAX/Equinox galaxy autoencoder
   checkpoint + config from a Weights & Biases run and reconstructs images
   by encode -> decode -> **reconvolve with the object's own PSF**, matching
@@ -219,9 +216,10 @@ python run_morphometrics.py --dataset ... --autoencoder my_autoencoder:MyAutoenc
 ```bash
 python run_morphometrics.py \
     --dataset your-org/your-galaxy-dataset --split train \
-    --image-field image --n-samples 2000 --stamp-size 128 \
-    --autoencoder galmorph.autoencoder:TFHubVAEAutoencoder \
-    --encoder-path modules/vae_16/encoder --decoder-path modules/vae_16/decoder \
+    --image-field image --psf-field psf_stamp \
+    --n-samples 2000 --stamp-size 64 \
+    --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder \
+    --encoder-path entity/project/run_id --decoder-path 1400 \
     --out-dir results
 ```
 
@@ -298,7 +296,7 @@ make_all_plots(
 run_morphometrics.py   CLI entry point
 galmorph/
   data.py              Hugging Face dataset -> postage stamps
-  autoencoder.py       Autoencoder interface + TF-Hub / identity / WandB (AE, flow) implementations
+  autoencoder.py       Autoencoder interface + identity / WandB (AE, flow) implementations
   stats.py             HSM moments (GalSim) + CAS/Gini-M20/MID (R via rpy2)
   pipeline.py          Per-dataset / multi-dataset statistics computation
   plotting.py          All comparison plots
