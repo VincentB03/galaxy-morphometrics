@@ -104,12 +104,22 @@ a minimal `Autoencoder` interface (`encode`/`decode`) plus:
   by encode -> decode -> **reconvolve with the object's own PSF**, matching
   the training/eval convention (real stamps are PSF-convolved, so
   reconstructions must be too before comparing statistics). Requires
-  `equinox`, `jax`, `wandb`, `pyyaml` and your own `pshear` package:
+  `equinox`, `jax`, `jax-galsim`, `flowjax`, `einops`, `wandb`, `pyyaml`
+  and the `pshear` package from Train-AE:
 
   ```bash
-  # pshear lives in a private repo; requires a GitHub access token
-  pip install "git+https://${GITHUB_TOKEN}@github.com/VincentB03/Train-AE.git"
-  # add #subdirectory=pshear if the package isn't at the repo root
+  # Train-AE is public, and is NOT pip-installable: it ships no setup.py or
+  # pyproject.toml. Clone it and put it on your PYTHONPATH -- `pshear` is a
+  # package directory at the repo root.
+  git clone https://github.com/VincentB03/Train-AE.git
+  export PYTHONPATH="$PWD/Train-AE:$PYTHONPATH"
+
+  # Train-AE's own requirements are the authoritative list for pshear: they
+  # pin equinox (which matters for reading the .eqx checkpoints) and cover
+  # jax-galsim, flowjax and einops, all of which pshear imports. Note that
+  # `jax-galsim` (used by pshear) and `galsim` (used by galmorph for the HSM
+  # moments) are different packages; both are needed here.
+  pip install -r Train-AE/requirements.txt
   ```
 
   ```bash
