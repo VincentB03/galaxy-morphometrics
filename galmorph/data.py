@@ -21,6 +21,8 @@ def load_hf_stamps(
     psf_field=None,
     noise_map_field=None,
     mask_field=None,
+    test_size=None,
+    split_seed=42,
 ):
     """
     Loads images from a Hugging Face dataset and turns them into a stack of
@@ -97,6 +99,16 @@ def load_hf_stamps(
         corresponding entry of `galmorph.pipeline.compute_statistics`'s
         `masks` argument so defective pixels are excluded/estimated
         instead of trusted as real zero flux.
+    test_size: float, optional
+        If given, `split` is re-split with `Dataset.train_test_split(
+        test_size=test_size, seed=split_seed)` and only its `"test"` part is
+        kept, before `n_samples` is applied. With `test_size=0.1` and the
+        default `split_seed=42` this is exactly the held-out set Train-AE
+        trains its models against. The split is shuffled, so a
+        `"train[90%:]"` slice does not select the same objects. Cannot be
+        combined with `streaming=True`.
+    split_seed: int
+        Seed of the `test_size` split.
 
     Returns
     -------
@@ -108,6 +120,11 @@ def load_hf_stamps(
 
     token = hf_token if hf_token is not None else os.environ.get("HF_TOKEN")
     ds = load_dataset(dataset_name, hf_config, split=split, streaming=streaming, token=token)
+
+    if test_size is not None:
+        if streaming:
+            raise ValueError("test_size needs the whole split to shuffle it and cannot be combined with streaming")
+        ds = ds.train_test_split(test_size=test_size, seed=split_seed)["test"]
 
     if n_samples is not None:
         if streaming:

@@ -252,6 +252,14 @@ first, with a seed currently hardcoded to `0` inside `load_hf_stamps` and
 not exposed on the CLI — still deterministic run to run, just not "the
 first N rows" anymore.)
 
+To measure only the objects the models were **not** trained on, pass
+`--test-size 0.1`: the `--split` is then re-split exactly as Train-AE does
+(`train_test_split(test_size=0.1, seed=42)["test"]`, seed set by
+`--split-seed`), and `--n-samples` takes the first rows of that held-out
+set. That split is shuffled, so a `--split "train[90%:]"` slice would
+select different objects. Pass an `--n-samples` larger than the held-out
+set (e.g. `10000`) to keep all of it. Not available with `--streaming`.
+
 `--flow-seed` (default `0`, used when `--flow-run` is set) seeds three
 things at once: the flow's own `z` draw (i.e. which galaxies get
 generated), which real-dataset PSF gets resampled onto each flow sample,

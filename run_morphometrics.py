@@ -49,6 +49,13 @@ def parse_args():
     g_data.add_argument("--dataset", required=True, help="Hugging Face dataset name or path")
     g_data.add_argument("--hf-config", default=None, help="Optional dataset configuration name")
     g_data.add_argument("--split", default="train")
+    g_data.add_argument(
+        "--test-size", type=float, default=None,
+        help="If given, re-split --split with train_test_split(test_size=..., seed=--split-seed) "
+             "and keep only its 'test' part. 0.1 with the default seed gives Train-AE's held-out "
+             "set. The split is shuffled: a 'train[90%%:]' slice does not select the same objects.",
+    )
+    g_data.add_argument("--split-seed", type=int, default=42, help="Seed for --test-size (Train-AE uses 42)")
     g_data.add_argument("--image-field", default="image")
     g_data.add_argument("--n-samples", type=int, default=2000)
     g_data.add_argument("--stamp-size", type=int, default=64)
@@ -171,6 +178,8 @@ def main():
         psf_field=args.psf_field,
         noise_map_field=args.noise_map_field,
         mask_field=args.mask_field,
+        test_size=args.test_size,
+        split_seed=args.split_seed,
     )
     if extra_fields or args.psf_field or args.noise_map_field or args.mask_field:
         real_images, extra = loaded
