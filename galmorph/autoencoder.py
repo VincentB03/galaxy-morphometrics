@@ -1,9 +1,6 @@
-# Pluggable autoencoder interface used to reconstruct galaxy images before
-# computing morphometric statistics on the reconstructions.
-#
-# Implement `encode`/`decode` for whatever model you have (a Hugging Face
-# model, a plain PyTorch checkpoint, ...) and pass an instance of your
-# subclass to `run_morphometrics.py` via `--autoencoder module:ClassName`.
+# Autoencoders used to build the "reconstruction" dataset, and the latent flow
+# used for "flow_prior". Plug in your own model by subclassing `Autoencoder` and
+# passing `--autoencoder module:ClassName` to run_morphometrics.py.
 from abc import ABC, abstractmethod
 import numpy as np
 
@@ -31,9 +28,7 @@ class Autoencoder(ABC):
 
 
 class IdentityAutoencoder(Autoencoder):
-    """No-op autoencoder: reconstruction == input. Useful to sanity-check
-    the pipeline (real vs real should give near-perfect agreement) or as a
-    placeholder while you wire up a real model."""
+    """No-op autoencoder (reconstruction == input), to sanity-check the pipeline."""
 
     def encode(self, images):
         return images
@@ -43,9 +38,8 @@ class IdentityAutoencoder(Autoencoder):
 
 
 def _unwrap_wandb_config(cfg):
-    """Flattens wandb's {desc: null, value: X} config format to X per key,
-    and coerces string-encoded literals (kernel_size, nested dict keys)
-    back to their Python types."""
+    """Flattens WandB's {desc, value} config entries and parses string-encoded
+    literals and integer dict keys back to Python types."""
     import ast
 
     result = {}
@@ -68,17 +62,10 @@ def _unwrap_wandb_config(cfg):
 
 def _fetch_wandb_checkpoint(run_path, epoch, cache_dir):
     """
-    Downloads (and caches under `cache_dir`) a run's config.yaml and
-    model_checkpoint_<epoch>.eqx from Weights & Biases -- the layout
-    written by both `pshear.utils.dump_galaxy_autoencoder` and `dump_flow`
-    -- and returns the local `epoch_dir` containing both files, patched so
-    `pshear.utils.load_galaxy_autoencoder`/`load_flow` can read it
-    directly.
-
-    If both files are already cached (e.g. pre-downloaded on a machine
-    with internet access and copied over), the WandB API is skipped
-    entirely, so this works on a compute node with no network access at
-    all.
+    Downloads a WandB run's config.yaml and model_checkpoint_<epoch>.eqx into
+    `cache_dir` and returns the epoch directory, in the layout read by
+    `pshear.utils.load_galaxy_autoencoder`/`load_flow`. Cached files are
+    reused without calling the WandB API, so this also works offline.
     """
     import shutil
     from pathlib import Path
@@ -135,31 +122,15 @@ def _fetch_wandb_checkpoint(run_path, epoch, cache_dir):
 
 class WandBGalaxyAutoencoder(Autoencoder):
     """
-    Loads a JAX/Equinox galaxy autoencoder (from the `pshear` package) from
-    a Weights & Biases run, and reconstructs images by encoding, decoding,
-    then reconvolving with each galaxy's PSF, matching the training/eval
-    convention: real "sci_subtracted" stamps are only ever compared against
-    PSF-reconvolved reconstructions, never against the raw intrinsic (AE
-    latent-space) output.
+    JAX/Equinox galaxy autoencoder from `pshear`, loaded from a WandB run (the
+    architecture is rebuilt from the run's config.yaml).
 
-    The model architecture itself is not specified here: `config.yaml`
-    downloaded from the run fully describes it, and `pshear.utils.
-    load_galaxy_autoencoder` rebuilds the equinox model from that config.
+    Reconstructs by encoding, decoding, then reconvolving with each object's
+    PSF, since real stamps are PSF-convolved. `reconstruct` therefore requires
+    `psf`; `encode`/`decode` alone are not supported.
 
-    Requires `equinox`, `jax`, `wandb`, `pyyaml` and `pshear` installed.
-
-    `encoder_path`/`decoder_path` (the CLI's generic positional autoencoder
-    args) double up here as `run_path` ("entity/project/run_id") and
-    `epoch`, e.g.:
-
-        python run_morphometrics.py \\
-            --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder \\
-            --encoder-path entity/project/run_id --decoder-path 1400 \\
-            --psf-field psf_stamp ...
-
-    Note `reconstruct()` requires the paired `psf` stamps (see
-    `galmorph.data.load_hf_stamps`'s `psf_field` argument) — `encode`/
-    `decode` alone are not meaningful without the PSF reconvolution step.
+    `run_path` ("entity/project/run_id") and `epoch` map to the CLI's
+    `--encoder-path` and `--decoder-path`.
     """
 
     def __init__(self, run_path, epoch, cache_dir="wandb_weights", seed=42):
@@ -208,31 +179,10 @@ class WandBGalaxyAutoencoder(Autoencoder):
 
 class WandBGalaxyFlow:
     """
-    Loads a JAX/Equinox latent normalizing flow (`pshear.nn.flow`, trained
-    by Train-AE's `experiments/train_flow.py`) from a Weights & Biases run,
-    and draws unconditional samples from it: z ~ flow, decoded and
-    reconvolved with a PSF, matching `train_flow.py`'s own `sample_images`
-    sanity check. This is meant to be added as an extra named dataset (e.g.
-    "flow_prior") alongside "real"/"reconstruction" in `run_morphometrics.py`,
-    to check whether the flow recovers the real data's morphometric
-    distributions, not to compare individual objects against it.
-
-    The flow only makes sense in the latent space of the specific
-    autoencoder it was trained against (`train_flow.py`'s `ae_run_dir`/
-    `ae_epoch`), so it does not load its own decoder: pass the
-    `WandBGalaxyAutoencoder` already built for the "reconstruction" dataset.
-
-    A flow sample has no real galaxy behind it, so it has no PSF of its own
-    either -- `sample()` takes one PSF stamp per requested sample, meant to
-    be resampled from the real dataset's own PSFs (see `run_morphometrics.py`).
-
-    Requires `equinox`, `jax`, `wandb`, `pyyaml` and `pshear` installed.
-
-        python run_morphometrics.py \\
-            --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder \\
-            --encoder-path entity/project/ae_run_id --decoder-path 1400 \\
-            --psf-field psf_stamp \\
-            --flow-run entity/project/flow_run_id --flow-epoch 500 ...
+    Latent normalizing flow from `pshear` (trained by Train-AE's
+    `experiments/train_flow.py`), loaded from a WandB run. Draws unconditional
+    samples z ~ flow and decodes them with `ae`, which must be the
+    `WandBGalaxyAutoencoder` whose latent space the flow was trained on.
     """
 
     def __init__(self, ae, run_path, epoch, cache_dir="wandb_weights", seed=42):
@@ -256,13 +206,8 @@ class WandBGalaxyFlow:
         self.flow = load_flow(epoch_dir, epoch=epoch)
 
     def sample(self, n, psf, batch_size=256):
-        """
-        Draws `n` unconditional samples from the flow prior, decodes and
-        reconvolves each with the corresponding row of `psf`, shape
-        (n, H, W) -- e.g. resampled with replacement from the real
-        dataset's PSF stamps, since flow samples don't have one of their
-        own.
-        """
+        """Draws `n` samples, each decoded and reconvolved with the matching row
+        of `psf`, shape (n, H, W)."""
         psf = np.asarray(psf)
         if len(psf) != n:
             raise ValueError("psf must have length n=%d, got %d" % (n, len(psf)))

@@ -1,34 +1,18 @@
 #!/usr/bin/env python
 """
-Computes galaxy morphometric statistics (HSM moments + CAS/Gini-M20/MID
-indicators) and reproduces the comparison plots from deep_galaxy_models's
-deepgal/validation, on your own data.
+Computes galaxy morphometric statistics (HSM moments, CAS, Gini-M20, MID) on
+real postage stamps and, optionally, on their autoencoder reconstructions and
+latent-flow samples, then saves one FITS catalog per dataset and the comparison
+plots.
 
-Typical workflow:
-  1. Load a stack of postage stamps from a Hugging Face image dataset.
-  2. Optionally reconstruct them through a pretrained autoencoder
-     (implement `galmorph.autoencoder.Autoencoder` for your model).
-  3. Optionally add unconditional samples from a latent normalizing flow
-     trained on that autoencoder's latent space (--flow-run), to check
-     whether the flow recovers the real data's distribution.
-  4. Compute statistics for "real", "reconstruction" and "flow_prior" (or
-     any other named sets of images you build yourself).
-  5. Save the catalogs and render every comparison plot.
-
-Example, with the optional flow-prior curve:
+Example:
     python run_morphometrics.py \\
-        --dataset your-org/your-galaxy-dataset --split train \\
-        --image-field image --n-samples 2000 --stamp-size 128 \\
+        --dataset your-org/your-dataset --image-field sci_subtracted \\
+        --psf-field psf_stamp --n-samples 2000 --stamp-size 64 \\
         --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder \\
         --encoder-path entity/project/ae_run_id --decoder-path 1400 \\
-        --psf-field psf_stamp \\
         --flow-run entity/project/flow_run_id --flow-epoch 500 \\
         --out-dir results
-
-Without --autoencoder, only the "real" dataset is analyzed (distribution
-plots only, no reconstruction-error plots). --flow-run is optional and
-independent of that choice of --autoencoder class, but only makes sense
-with galmorph.autoencoder:WandBGalaxyAutoencoder (see galmorph/autoencoder.py).
 """
 import argparse
 import importlib
@@ -51,9 +35,8 @@ def parse_args():
     g_data.add_argument("--split", default="train")
     g_data.add_argument(
         "--test-size", type=float, default=None,
-        help="If given, re-split --split with train_test_split(test_size=..., seed=--split-seed) "
-             "and keep only its 'test' part. 0.1 with the default seed gives Train-AE's held-out "
-             "set. The split is shuffled: a 'train[90%%:]' slice does not select the same objects.",
+        help="Keep only the 'test' part of train_test_split(test_size=..., seed=--split-seed). "
+             "0.1 gives Train-AE's held-out set (shuffled, not the same as 'train[90%%:]').",
     )
     g_data.add_argument("--split-seed", type=int, default=42, help="Seed for --test-size (Train-AE uses 42)")
     g_data.add_argument("--image-field", default="image")
@@ -63,83 +46,62 @@ def parse_args():
     g_data.add_argument("--streaming", action="store_true")
     g_data.add_argument(
         "--binning-field", default=None,
-        help="Optional numeric catalog column (e.g. magnitude) used for the "
-             "ellipticity/rho4-vs-binning plots",
+        help="Numeric catalog column (e.g. magnitude) for the binned ellipticity/rho4 plots",
     )
     g_data.add_argument(
         "--hf-token", default=os.environ.get("HF_TOKEN"),
-        help="Auth token for private/gated Hugging Face datasets. "
-             "Defaults to the HF_TOKEN environment variable.",
+        help="Token for private/gated datasets (default: $HF_TOKEN)",
     )
     g_data.add_argument(
         "--psf-field", default=None,
-        help="Optional per-object PSF stamp column, fitted to --stamp-size "
-             "like --image-field. Needed by autoencoders (e.g. "
-             "WandBGalaxyAutoencoder) that reconvolve their reconstruction "
-             "with the PSF before statistics are computed on it.",
+        help="Per-object PSF column, kept at its native size. Required by "
+             "WandBGalaxyAutoencoder and --flow-run.",
     )
     g_data.add_argument(
         "--noise-map-field", default=None,
-        help="Optional per-object noise map column (per-pixel noise "
-             "standard deviation), fitted to --stamp-size like "
-             "--image-field. When given together with --autoencoder, white "
-             "noise scaled by this map is added to the reconstructed "
-             "images, since they otherwise come out noise-free and the "
-             "CAS/Gini-M20/MID indicators need a realistic S/N to be "
-             "meaningful.",
+        help="Per-pixel noise std column. White noise scaled by it is added to the "
+             "(noise-free) reconstructions and flow samples.",
     )
     g_data.add_argument(
         "--noise-seed", type=int, default=0,
-        help="Seed for the white noise draw used by --noise-map-field.",
+        help="Seed for the noise added to the reconstructions",
     )
     g_data.add_argument(
         "--mask-field", default=None,
-        help="Optional per-object bad-pixel mask column (nonzero = bad "
-             "pixel, e.g. cosmic rays or other detector defects), fitted "
-             "to --stamp-size like --image-field. When given, masked "
-             "pixels are excluded from the HSM moments fit and locally "
-             "interpolated (or the stamp skipped) for the CAS/Gini-M20/MID "
-             "indicators, instead of being trusted as real zero flux.",
+        help="Per-pixel validity mask column (1 = valid, 0 = bad). Bad pixels are "
+             "excluded from the HSM fit and filled in for the R indicators.",
     )
 
     g_ae = p.add_argument_group("autoencoder (optional)")
     g_ae.add_argument(
         "--autoencoder", default=None,
-        help="'module.path:ClassName' of an Autoencoder subclass, "
-             "e.g. galmorph.autoencoder:WandBGalaxyAutoencoder",
+        help="'module:Class' of an Autoencoder subclass, e.g. galmorph.autoencoder:WandBGalaxyAutoencoder",
     )
-    g_ae.add_argument("--encoder-path", default=None, help="Passed as first positional arg to the autoencoder class")
-    g_ae.add_argument("--decoder-path", default=None, help="Passed as second positional arg to the autoencoder class")
+    g_ae.add_argument("--encoder-path", default=None, help="First constructor arg (WandB run path for WandBGalaxyAutoencoder)")
+    g_ae.add_argument("--decoder-path", default=None, help="Second constructor arg (checkpoint epoch for WandBGalaxyAutoencoder)")
 
     g_flow = p.add_argument_group(
-        "flow prior sampling (optional, requires --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder and --psf-field)"
+        "flow prior (optional, requires WandBGalaxyAutoencoder and --psf-field)"
     )
     g_flow.add_argument(
         "--flow-run", default=None,
-        help="wandb 'entity/project/run_id' of a latent normalizing flow trained on --autoencoder's "
-             "latent space (Train-AE's experiments/train_flow.py). When given, draws unconditional "
-             "samples z~flow, decodes them through the SAME autoencoder as --autoencoder (not a "
-             "separate download -- the flow only makes sense in that specific latent space), "
-             "reconvolves them with PSFs resampled from the real dataset, and adds the result as a "
-             "third 'flow_prior' dataset/curve on every distribution plot, to check whether the flow "
-             "recovers the real data's morphometric distribution. Omit to skip this curve entirely.",
+        help="WandB 'entity/project/run_id' of a latent flow trained on --autoencoder's latent "
+             "space. Adds a 'flow_prior' dataset: z ~ flow, decoded by the same autoencoder and "
+             "reconvolved with PSFs drawn from the real dataset.",
     )
     g_flow.add_argument("--flow-epoch", type=int, default=None, help="Checkpoint epoch for --flow-run")
     g_flow.add_argument(
         "--flow-cache-dir", default="wandb_weights",
-        help="Local cache dir for downloaded flow weights (mirrors WandBGalaxyAutoencoder's own cache_dir)",
+        help="Local cache for the downloaded flow weights",
     )
     g_flow.add_argument(
         "--flow-n-samples", type=int, default=None,
-        help="Number of flow samples to draw (default: same as the real dataset, i.e. --n-samples)",
+        help="Number of flow samples (default: number of real stamps)",
     )
-    g_flow.add_argument("--flow-seed", type=int, default=0, help="Seed for flow sampling and PSF resampling")
+    g_flow.add_argument("--flow-seed", type=int, default=0, help="Seed for the flow draw, its PSF assignment and its noise")
     g_flow.add_argument(
         "--psf-seed", type=int, default=None,
-        help="Seed for PSF resampling only, decoupled from --flow-seed (default: same as "
-             "--flow-seed). Set this independently of --flow-seed to check whether the choice "
-             "of PSF affects the flow_prior statistics, while keeping the flow's own z-samples "
-             "(and the noise draw, if --noise-map-field is set) fixed.",
+        help="Seed for the PSF assignment only (default: --flow-seed), to isolate its effect",
     )
 
     g_stats = p.add_argument_group("statistics")
@@ -227,8 +189,7 @@ def main():
             ae, args.flow_run, args.flow_epoch, cache_dir=args.flow_cache_dir, seed=args.flow_seed
         )
         n_flow = args.flow_n_samples or len(real_images)
-        # flow samples are unconditional (no real galaxy behind them), so they borrow
-        # a PSF at random from the real dataset rather than one of their own
+        # flow samples have no PSF of their own: borrow random ones from the real dataset
         psf_seed = args.psf_seed if args.psf_seed is not None else args.flow_seed
         rng = np.random.default_rng(psf_seed)
         flow_idx = rng.integers(0, len(psf_images), size=n_flow)
@@ -237,8 +198,7 @@ def main():
             print("Adding white noise scaled by --noise-map-field to the flow samples")
             datasets["flow_prior"] = add_noise(datasets["flow_prior"], noise_map[flow_idx], seed=args.flow_seed)
 
-    # only "reconstruction" is index-aligned with "real" (same galaxy, encoded then decoded);
-    # "flow_prior" draws are unconditional and must not be fed to the per-object paired plots
+    # only "reconstruction" is object-by-object aligned with "real"
     paired_names = ["reconstruction"] if "reconstruction" in datasets else None
 
     print("Computing statistics (moments%s)..." % ("" if args.skip_r else " + CAS/Gini-M20/MID"))

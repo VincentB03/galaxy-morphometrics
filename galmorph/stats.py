@@ -1,8 +1,6 @@
-# Morphometric statistics on postage-stamp galaxy images.
-#
-# `moments()` computes HSM (adaptive moments) shape statistics with GalSim.
-# `morph_stats()` computes the CAS / Gini-M20 / MID indicators via the R
-# routines in `r_indicators/`, ported from deepgal/validation.
+# Morphometric statistics on galaxy postage stamps:
+#   moments()      HSM adaptive moments (GalSim)
+#   morph_stats()  CAS / Gini-M20 / MID, via the R code in r_indicators/
 import os
 import numpy as np
 import pandas as pd
@@ -12,9 +10,7 @@ from scipy.ndimage import median_filter
 
 R_INDICATORS_DIR = os.path.join(os.path.dirname(__file__), "r_indicators")
 
-# Columns returned by the R `compute_statistics_single` routine, used to
-# build a placeholder row for stamps skipped in `morph_stats` because too
-# much of them is masked (see `max_masked_frac`).
+# Columns returned by the R code, used for the placeholder row of skipped stamps
 _MORPH_COLUMNS = [
     "M_level", "M", "M_level_o", "M_o", "M_level_p", "M_p",
     "I", "D", "axmax", "axmin", "angle", "sn", "size", "Gini", "M20", "C", "A",
@@ -22,10 +18,7 @@ _MORPH_COLUMNS = [
 
 
 def _as_stack(images):
-    """Normalizes input to an (N, H, W) array of images. Accepts a single
-    (H, W) image or an already-batched (N, H, W) stack, which is how every
-    caller in this package (`pipeline.py`, `run_morphometrics.py`) passes
-    images."""
+    """Returns a single (H, W) image or an (N, H, W) stack as an (N, H, W) array."""
     images = np.asarray(images)
     if images.ndim == 2:
         images = images[np.newaxis]
@@ -35,9 +28,7 @@ def _as_stack(images):
 
 
 def _as_mask_stack(masks, images):
-    """Normalizes an optional bad-pixel mask to match `images`'s (N, H, W)
-    shape. Any nonzero value marks a bad pixel (e.g. a cosmic ray hit or
-    other detector defect)."""
+    """Returns the optional bad-pixel masks (nonzero = bad) with the shape of `images`."""
     if masks is None:
         return None
     masks = _as_stack(np.asarray(masks))
@@ -53,18 +44,14 @@ def moments(images, scale=0.03, stamp_size=None, masks=None):
     Parameters
     ----------
     images: array_like, shape (N, H, W)
-        Postage stamps.
     scale: float
         Pixel scale in arcsec/pixel.
     stamp_size: int, optional
-        Size of the postage stamp, used as the centroid guess. Defaults to
-        the image size.
+        Centroid guess is (stamp_size // 2, stamp_size // 2). Defaults to the
+        image size.
     masks: array_like, shape (N, H, W), optional
-        Bad-pixel masks aligned with `images` (nonzero = bad pixel, e.g. a
-        cosmic ray hit). When given, bad pixels are excluded from the HSM
-        fit via GalSim's `badpix` argument, instead of being treated as
-        real zero flux -- which would otherwise bias the measured size and
-        ellipticity.
+        Bad-pixel masks (nonzero = bad), excluded from the fit through
+        GalSim's `badpix` instead of counting as zero flux.
 
     Returns
     -------
@@ -116,43 +103,28 @@ def moments(images, scale=0.03, stamp_size=None, masks=None):
 
 
 def _fill_masked(image, bad, size=5):
-    """Fills masked pixels with the median of their local neighborhood.
-
-    This is only a plausible local estimate, not the true pixel value -- it
-    exists because the R statistics below have no notion of missing data
-    and would otherwise see a sharp zero-flux hole, which biases
-    Gini/M20/Asymmetry/Multimode more than a smooth local estimate does.
-    """
+    """Replaces masked pixels with their local median. The R code has no notion
+    of missing data, and a zero-flux hole biases the indicators more."""
     filled = median_filter(image, size=size)
     return np.where(bad, filled, image)
 
 
 def morph_stats(images, masks=None, max_masked_frac=0.10):
     """
-    Computes CAS (Concentration, Asymmetry, Smoothness), Gini/M20 and MID
-    (Multimode, Intensity, Deviation) morphological indicators using the R
-    implementation from Freeman et al. / Lotz et al., via rpy2.
-
-    Requires R with the `SDMTools` package installed (see README).
+    Computes the CAS (Concentration, Asymmetry), Gini/M20 and MID (Multimode,
+    Intensity, Deviation) indicators with the R code, via rpy2. Requires R
+    with SDMTools (see README).
 
     Parameters
     ----------
     images: array_like, shape (N, H, W)
-        Postage stamps. For best results, crop to the galaxy-centered
-        region (the original paper uses 64x64 stamps cropped from 128x128).
+        Postage stamps, ideally cropped around the galaxy.
     masks: array_like, shape (N, H, W), optional
-        Bad-pixel masks aligned with `images` (nonzero = bad pixel). The R
-        routines have no notion of missing data, so masked pixels are
-        filled in with a local median estimate before the statistics are
-        computed (see `_fill_masked`), rather than left at the raw zero
-        value in `images` -- which would otherwise read as spurious
-        structure to the Asymmetry/Multimode/Gini/M20 indicators. Stamps
-        with a masked fraction above `max_masked_frac` are skipped entirely
-        (flagged False) instead of being measured on mostly fabricated
-        data.
+        Bad-pixel masks (nonzero = bad). Bad pixels are filled with
+        `_fill_masked` before the measurement.
     max_masked_frac: float
-        Maximum fraction of masked pixels tolerated per stamp before it is
-        skipped rather than filled in. Ignored if `masks` is None.
+        Stamps with a larger masked fraction are skipped (flag False, -9
+        values).
 
     Returns
     -------

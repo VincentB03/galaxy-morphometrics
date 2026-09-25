@@ -1,5 +1,5 @@
-# Ties together moments + morphological statistics computation for one or
-# several named sets of postage stamps (e.g. "real" vs "reconstruction").
+# HSM moments + R morphological indicators for one or several named sets of
+# postage stamps (e.g. "real" vs "reconstruction").
 from multiprocessing import Pool
 
 import numpy as np
@@ -35,37 +35,28 @@ def compute_statistics_single(
     masks=None,
 ):
     """
-    Computes HSM moments and (optionally) CAS/Gini-M20/MID statistics for a
-    single stack of postage stamps.
+    Computes HSM moments and, optionally, CAS/Gini-M20/MID for one stack of
+    postage stamps.
 
     Parameters
     ----------
     images: array_like, shape (N, H, W)
     pixel_scale: float
-        Pixel scale in arcsec/pixel, used by the HSM moments.
+        Pixel scale in arcsec/pixel.
     morph_crop: int, optional
-        If given, crop each stamp to a `morph_crop` x `morph_crop` window
-        around the center before computing the R-based morphological
-        indicators (the original paper crops 128x128 stamps to 64x64).
+        Center-crops stamps (and masks) to this size before the R indicators.
     pool_size: int, optional
         Number of worker processes. None disables multiprocessing.
     compute_morph: bool
-        Whether to compute the R-based CAS/Gini-M20/MID indicators. Set to
-        False if R/rpy2/SDMTools are not installed.
+        Computes the R indicators. False if R/SDMTools is not installed.
     masks: array_like, shape (N, H, W), optional
-        Bad-pixel masks aligned with `images` (nonzero = bad pixel, e.g. a
-        cosmic ray hit or other detector defect). When given, they are used
-        instead of trusting the zeroed-out pixel values in `images`: HSM
-        moments exclude bad pixels from the fit (see `stats.moments`), and
-        the R CAS/Gini-M20/MID indicators get a locally-interpolated value
-        in their place, or the stamp is skipped if too much of it is masked
-        (see `stats.morph_stats`). Cropped the same way as `images` before
-        being passed to the R indicators when `morph_crop` is given.
+        Bad-pixel masks (nonzero = bad), see `stats.moments` and
+        `stats.morph_stats`.
 
     Returns
     -------
-    astropy.table.Table with one row per image, and a `flag` column that
-    is True only when every requested statistic succeeded.
+    astropy.table.Table with one row per image. `flag` is True only when every
+    requested statistic succeeded.
     """
     images = np.asarray(images)
     ident = np.arange(len(images))
@@ -118,19 +109,9 @@ def compute_statistics_single(
 
 def compute_statistics(datasets, pixel_scale=0.03, morph_crop=None, pool_size=None, compute_morph=True, masks=None):
     """
-    Computes statistics for several named datasets at once.
-
-    Parameters
-    ----------
-    datasets: dict[str, array_like]
-        Mapping from dataset name (e.g. "real", "reconstruction") to a
-        stack of postage stamps of identical shape.
-    masks: dict[str, array_like], optional
-        Mapping from dataset name to a bad-pixel mask stack aligned with
-        the corresponding entry in `datasets` (see
-        `compute_statistics_single`). Datasets without an entry here (e.g.
-        a synthetic "reconstruction" set with no detector defects) are
-        computed without mask support.
+    Runs `compute_statistics_single` on each entry of `datasets` (name ->
+    stack of stamps). `masks` maps a dataset name to its bad-pixel masks;
+    datasets missing from it are computed without masks.
 
     Returns
     -------

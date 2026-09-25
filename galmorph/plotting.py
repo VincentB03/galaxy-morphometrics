@@ -1,7 +1,5 @@
-# Morphometric comparison plots, generalized from deepgal/validation/plotting.py
-# and the Figure_Moments.ipynb / Figure_Morphology.ipynb notebooks of the
-# deep_galaxy_models repo to work on an arbitrary number of named datasets
-# (not just "real"/"mock"/"param").
+# Comparison plots adapted from deep_galaxy_models (deepgal/validation/plotting.py,
+# Figure_Moments.ipynb, Figure_Morphology.ipynb), for any number of named datasets.
 import os
 
 import numpy as np
@@ -99,21 +97,9 @@ def binned_statistic_plot(
     logy=False,
 ):
     """
-    Generic error-bar plot of `mean(y_column) +/- sem` in bins of an
-    external per-object quantity, e.g. ellipticity or rho4 vs magnitude,
-    flux radius, or size. This factors out the repeated binning code used
-    throughout the original notebooks.
-
-    Parameters
-    ----------
-    tables: dict[str, astropy.table.Table]
-    y_column: str
-        Column name to average within each table.
-    x_values: dict[str, array_like]
-        Per-dataset array of the binning quantity, same length as the
-        corresponding table (e.g. magnitude, flux radius).
-    bins: array_like
-        Bin edges.
+    Plots mean(`y_column`) +/- sem in `bins` of a per-object quantity
+    (`x_values`: dataset name -> array aligned with its table), e.g.
+    ellipticity vs magnitude.
     """
     from scipy.stats import sem
 
@@ -260,11 +246,8 @@ def paired_reconstruction_error(
     filename_prefix="",
 ):
     """
-    Per-object comparison plots between two *index-aligned* tables coming
-    from the same underlying galaxies (e.g. real images vs their
-    autoencoder reconstructions): relative size error and flux ratio
-    binned by the reference object's own size, as in
-    deepgal/validation/plotting.moments_plots.
+    Per-object relative size error and flux ratio vs the reference size, for
+    two object-by-object aligned tables (e.g. real vs reconstruction).
     """
     from scipy.stats import sem
 
@@ -309,33 +292,20 @@ def make_all_plots(
     skip_morph=False,
 ):
     """
-    Runs every applicable plot on a dict of named statistics tables and
-    writes the figures to `out_dir`. Silently skips plots whose required
-    inputs are missing (e.g. morphological columns if R was disabled, or
-    binned plots if `binning_values` wasn't provided).
+    Writes every applicable plot to `out_dir` and returns their paths. Plots
+    whose inputs are missing (R columns, `binning_values`) are skipped.
 
     Parameters
     ----------
     tables: dict[str, astropy.table.Table]
         Output of `galmorph.pipeline.compute_statistics`.
     binning_values: dict[str, array_like], optional
-        Per-dataset external quantity (e.g. magnitude) to bin ellipticity
-        and rho4 against, matching Figure_Moments.ipynb.
+        Per-dataset quantity (e.g. magnitude) for the binned plots.
     reference_name: str, optional
-        If given and present in `tables`, per-object reconstruction-error
-        plots are made between this dataset and each of `paired_names`
-        (requires index-aligned, same-length tables, e.g. "real" vs
-        "reconstruction").
+        Reference dataset for the per-object error plots.
     paired_names: list[str], optional
-        Names of the datasets that are index-aligned with `reference_name`
-        (object i of `tables[name]` is object i of `tables[reference_name]`
-        run through some transformation), and thus eligible for the
-        per-object `paired_reconstruction_error` plots. Defaults to every
-        other dataset in `tables`. Datasets that aren't index-aligned with
-        the reference -- e.g. unconditional samples from a generative model
-        such as `galmorph.autoencoder.WandBGalaxyFlow`, which have no
-        specific real galaxy behind them -- must be excluded here, since
-        for those a matching length is a coincidence, not a correspondence.
+        Datasets aligned object by object with `reference_name` (default: all
+        others). Exclude unconditional samples such as "flow_prior".
     """
     os.makedirs(out_dir, exist_ok=True)
     written = []

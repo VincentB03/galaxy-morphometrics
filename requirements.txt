@@ -1,4 +1,4 @@
-# Core pipeline (moments + plotting + Hugging Face loading)
+# Core pipeline
 numpy
 scipy
 pandas
@@ -8,15 +8,7 @@ seaborn
 galsim
 datasets
 
-# CAS / Gini-M20 / MID morphological indicators (R backend).
-# Needs a working R installation with the SDMTools package (archived on
-# CRAN, install from the archive, see README.md).
+# CAS / Gini-M20 / MID: also needs R with SDMTools (see README)
 rpy2
 
-# Only needed for the bundled WandBGalaxyAutoencoder.
-# equinox
-# jax
-# wandb
-# pyyaml
-#jax_galsim
-# pshear  # see ReadME
+# WandBGalaxyAutoencoder and --flow-run: install Train-AE's requirements (see README)

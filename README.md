@@ -1,312 +1,141 @@
 # galaxy-morphometrics
 
-Standalone toolkit to compute galaxy morphometric statistics and reproduce
-the comparison plots from
-[deep_galaxy_models](https://github.com/McWilliamsCenter/deep_galaxy_models)'s
-`deepgal/validation` (Lanusse et al. 2020), applied to your own data instead
-of the COSMOS + GalSim-Hub pipeline the original repo was built around.
+Computes morphometric statistics on galaxy postage stamps and compares their
+distributions across datasets: real images, their autoencoder reconstructions,
+and samples from a latent normalizing flow.
 
-Given postage-stamp galaxy images (loaded from a Hugging Face dataset),
-optionally their reconstruction through a pretrained autoencoder, and
-optionally unconditional samples from a latent normalizing flow trained on
-that autoencoder's latent space, this repo computes:
+| Statistic | Reference |
+|---|---|
+| HSM adaptive moments (GalSim): size `sigma_e`, ellipticity `e`/`g`, `rho4`, flux `amp` | Hirata & Seljak (2003), Mandelbaum et al. (2005) |
+| CAS: Concentration, Asymmetry | Conselice (2003) |
+| Gini / M20 | Lotz, Primack & Madau (2004) |
+| MID: Multimode, Intensity, Deviation | Freeman et al. (2013) |
 
-- **HSM adaptive moments** (GalSim `FindAdaptiveMom`): size `sigma_e`,
-  ellipticity `e`/`e1`/`e2`/`g`/`g1`/`g2`, `rho4`, flux `amp`.
-- **CAS** (Concentration, Asymmetry) — Conselice (2003).
-- **Gini / M20** — Lotz, Primack & Madau (2004).
-- **MID** (Multimode, Intensity, Deviation) — Freeman et al. (2013).
+Statistics and plots are adapted from `deepgal/validation` in
+[deep_galaxy_models](https://github.com/McWilliamsCenter/deep_galaxy_models)
+([Lanusse et al. 2020](https://arxiv.org/abs/2008.03833)), generalized to any
+Hugging Face dataset and any number of named datasets.
 
-...and renders the same kind of plots as the [paper](https://arxiv.org/abs/2008.03833): ellipticity/size
-distributions, `rho4` vs magnitude/size, Gini-M20, M-I, M-D, MID
-distributions (one curve per named dataset — real, reconstruction,
-flow_prior, or any others you add), and (when a reference/reconstruction
-pair is available) per-object reconstruction error plots.
-
-## Origin
-
-The statistics and R routines are ported from `deepgal/validation/` in
-deep_galaxy_models with minimal changes (path fixes only). The plotting
-logic is generalized from `deepgal/validation/plotting.py` and the
-`Figure_Moments.ipynb` / `Figure_Morphology.ipynb` notebooks to work on an
-arbitrary number of named datasets instead of the hardcoded
-real/mock/parametric triplet.
-
-## Install
+## Installation
 
 ```bash
 pip install -r requirements.txt
 ```
 
-GalSim itself has non-Python dependencies (FFTW, TMV/Eigen) — follow the
-[GalSim install instructions](https://github.com/GalSim-developers/GalSim)
-if `pip install galsim` fails.
+If `pip install galsim` fails, see the
+[GalSim install instructions](https://github.com/GalSim-developers/GalSim).
 
-### Private Hugging Face datasets
-
-To load a private or gated dataset, set the `HF_TOKEN` environment
-variable to a Hugging Face access token (Settings -> Access Tokens on
-huggingface.co) before running:
+**R backend** (CAS, Gini-M20, MID, called through `rpy2`). Not needed with `--skip-r`.
 
 ```bash
-export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-python run_morphometrics.py --dataset your-org/your-private-dataset ...
-```
-
-`HF_TOKEN` is picked up automatically; alternatively pass `--hf-token` on
-the CLI, or `hf_token=...` to `galmorph.data.load_hf_stamps` directly.
-
-### R backend (CAS / Gini-M20 / MID)
-
-These indicators call into R via `rpy2`. You need:
-
-```bash
-# R itself, e.g. via conda or your OS package manager
 conda install -c conda-forge r-base
-
-# SDMTools was archived on CRAN; install the last release from the archive.
-# Its dependency R.utils isn't archived, install it from CRAN first or the
-# SDMTools install will fail with "dependency 'R.utils' is not available".
 R -e 'install.packages("R.utils")'
-R -e 'install.packages("https://cran.r-project.org/src/contrib/Archive/SDMTools/SDMTools_1.1-221.2.tar.gz", repos=NULL, type="source")'
-```
-
-On recent toolchains (e.g. Ubuntu 22.04 / R >= 4.x, including Colab), the
-build fails with `error: 'PI' undeclared` in `pointinpolygon.c` and
-`vincenty.geodesics.c` — `PI` used to come in transitively via `<R.h>` /
-`<Rmath.h>` and no longer does (only `M_PI` is guaranteed). Patch both
-source files before installing:
-
-```bash
-cd /tmp
+# SDMTools is archived on CRAN: build it from source
 wget -q https://cran.r-project.org/src/contrib/Archive/SDMTools/SDMTools_1.1-221.2.tar.gz
 tar xzf SDMTools_1.1-221.2.tar.gz
+# Only needed with R >= 4 (e.g. Colab), where the build fails with "'PI' undeclared":
 sed -i '9a #include <math.h>\n#define PI M_PI' SDMTools/src/pointinpolygon.c
 sed -i '7a #define PI M_PI' SDMTools/src/vincenty.geodesics.c
 R CMD INSTALL SDMTools
 ```
 
-If you don't need CAS/Gini-M20/MID, pass `--skip-r` to skip this
-dependency entirely — you still get the full set of HSM moments and
-their plots.
-
-### Autoencoder (optional)
-
-Reconstructing images requires a model. `galmorph/autoencoder.py` defines
-a minimal `Autoencoder` interface (`encode`/`decode`) plus:
-
-- `IdentityAutoencoder`: no-op, useful to sanity-check the pipeline.
-- `WandBGalaxyAutoencoder`: downloads a JAX/Equinox galaxy autoencoder
-  checkpoint + config from a Weights & Biases run and reconstructs images
-  by encode -> decode -> **reconvolve with the object's own PSF**, matching
-  the training/eval convention (real stamps are PSF-convolved, so
-  reconstructions must be too before comparing statistics). Requires
-  `equinox`, `jax`, `jax-galsim`, `flowjax`, `einops`, `wandb`, `pyyaml`
-  and the `pshear` package from Train-AE:
-
-  ```bash
-  # Train-AE is public, and is NOT pip-installable: it ships no setup.py or
-  # pyproject.toml. Clone it and put it on your PYTHONPATH -- `pshear` is a
-  # package directory at the repo root.
-  git clone https://github.com/VincentB03/Train-AE.git
-  export PYTHONPATH="$PWD/Train-AE:$PYTHONPATH"
-
-  # Train-AE's own requirements are the authoritative list for pshear: they
-  # pin equinox (which matters for reading the .eqx checkpoints) and cover
-  # jax-galsim, flowjax and einops, all of which pshear imports. Note that
-  # `jax-galsim` (used by pshear) and `galsim` (used by galmorph for the HSM
-  # moments) are different packages; both are needed here.
-  pip install -r Train-AE/requirements.txt
-  ```
-
-  ```bash
-  python run_morphometrics.py \
-      --dataset your-org/your-dataset --image-field sci_subtracted \
-      --psf-field psf_stamp --n-samples 2000 --stamp-size 64 \
-      --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder \
-      --encoder-path entity/project/run_id --decoder-path 1400 \
-      --out-dir results
-  ```
-
-  (`--encoder-path`/`--decoder-path` double up as the WandB run path and
-  checkpoint epoch here — see the class docstring.) `--psf-field` is
-  required for this autoencoder: it loads a per-object PSF stamp
-  alongside the image, kept at its native size (not resized to
-  `--stamp-size` — the convolution step handles the size mismatch), which
-  `WandBGalaxyAutoencoder.reconstruct` needs to reconvolve the decoded
-  image before statistics are computed on it.
-
-#### Adding noise to reconstructions
-
-Autoencoder reconstructions come out noise-free, but the CAS/Gini-M20/MID
-indicators (`galmorph/r_indicators/`) estimate their segmentation
-threshold and S/N from the background pixel scatter — degenerate on a
-noise-free image, and not comparable to the real images' own S/N. Pass
-`--noise-map-field` to add a white-noise realization, scaled by a
-per-object noise map column from the dataset (per-pixel noise standard
-deviation, fit to `--stamp-size` like `--image-field`), to the
-reconstruction before statistics are computed on it:
+**Autoencoder and flow** (`WandBGalaxyAutoencoder`, `--flow-run`). They need the
+`pshear` package from [Train-AE](https://github.com/VincentB03/Train-AE), which
+is not pip-installable:
 
 ```bash
-python run_morphometrics.py \
-    --dataset your-org/your-dataset --image-field sci_subtracted \
-    --psf-field psf_stamp --noise-map-field noise_map \
-    --n-samples 2000 --stamp-size 64 \
-    --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder \
-    --encoder-path entity/project/run_id --decoder-path 1400 \
-    --out-dir results
+git clone https://github.com/VincentB03/Train-AE.git
+export PYTHONPATH="$PWD/Train-AE:$PYTHONPATH"
+pip install -r Train-AE/requirements.txt   # install jax first, with the right CUDA build
 ```
 
-`--noise-seed` (default `0`) seeds the noise draw for reproducibility. The
-"real" images are left untouched — they already carry their own noise.
-Use `galmorph.data.add_noise(images, noise_map, seed=...)` directly if
-you're calling the library instead of the CLI.
+**Private Hugging Face datasets**: `export HF_TOKEN=hf_...` (or `--hf-token`).
 
-#### Flow prior sampling (optional)
-
-A latent normalizing flow fit to `WandBGalaxyAutoencoder`'s latent space
-(Train-AE's `experiments/train_flow.py`) should, if it has learned that
-space correctly, reproduce the real data's morphometric distribution when
-its samples are decoded. Pass `--flow-run` to check this: it adds a third
-`flow_prior` dataset — unconditional samples z ~ flow, decoded through the
-*same* autoencoder as `--autoencoder` and reconvolved with PSFs resampled
-from the real dataset (a flow sample has no real galaxy, and therefore no
-PSF, of its own) — so every distribution plot shows real vs reconstruction
-vs flow_prior. The per-object reconstruction-error plots are unaffected:
-`flow_prior` isn't index-aligned with "real" and is never included there.
+## Usage
 
 ```bash
 python run_morphometrics.py \
     --dataset your-org/your-dataset --image-field sci_subtracted \
-    --psf-field psf_stamp --n-samples 2000 --stamp-size 64 \
+    --psf-field psf_stamp --noise-map-field noise_map --mask-field binary_mask \
+    --n-samples 2000 --stamp-size 64 \
     --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder \
     --encoder-path entity/project/ae_run_id --decoder-path 1400 \
     --flow-run entity/project/flow_run_id --flow-epoch 500 \
     --out-dir results
 ```
 
-Requires `--autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder` and
-`--psf-field`. `--flow-n-samples` defaults to the real dataset's own count;
-`--flow-seed` (default `0`) seeds both the flow draw and the PSF
-resampling. Omit `--flow-run` to skip this curve entirely — everything
-else behaves exactly as before.
+This writes one catalog per dataset to `results/catalog_<name>.fits` and all
+plots to `results/plots/`. The datasets are:
 
-To plug in your own pretrained model (a Hugging Face model, a PyTorch
-checkpoint, etc.), subclass `Autoencoder` in a small module of your own and
-point `--autoencoder` at it, e.g.:
+| Name | Content | Enabled by |
+|---|---|---|
+| `real` | stamps as loaded | always |
+| `reconstruction` | encode → decode → reconvolution with the object's own PSF | `--autoencoder` |
+| `flow_prior` | z ~ flow, decoded by the same autoencoder, reconvolved with a PSF drawn from the real set | `--flow-run` |
+
+`flow_prior` has no real counterpart object, so it only appears in the
+distribution plots, not in the per-object error plots.
+
+Main options (`--help` for the full list):
+
+| Option | Role |
+|---|---|
+| `--n-samples` | Takes the **first** N rows of the split (a shuffled sample with `--streaming`), so every run sees the same objects. |
+| `--test-size 0.1` | Measures only Train-AE's held-out set: `train_test_split(test_size=0.1, seed=42)["test"]` (seed set by `--split-seed`). This split is shuffled, so it is not the same as `train[90%:]`. Not compatible with `--streaming`. |
+| `--psf-field` | Per-object PSF, kept at its native size. Required by `WandBGalaxyAutoencoder` and `--flow-run`. |
+| `--noise-map-field` | Adds white noise scaled by the noise map to the reconstructions and flow samples, which are noise-free otherwise. The R indicators estimate their threshold and S/N from the background, so they need realistic noise. |
+| `--mask-field` | Validity mask (1 = valid, 0 = bad). Bad pixels are excluded from the HSM fit and replaced by a local median for the R indicators. Stamps with more than 10 % bad pixels are skipped by the R indicators. |
+| `--noise-seed`, `--flow-seed`, `--psf-seed` | `--noise-seed` seeds the reconstruction noise. `--flow-seed` seeds the flow draw, its PSF assignment and its noise. `--psf-seed` changes only the PSF assignment, to isolate its effect. |
+| `--binning-field` | Catalog column (e.g. magnitude) for the binned ellipticity and `rho4` plots. |
+| `--morph-crop`, `--pool-size`, `--skip-r` | Crop before the R indicators, number of worker processes, skip the R indicators. |
+
+### Custom autoencoder
+
+Subclass `Autoencoder` and pass it with `--autoencoder module:Class`:
 
 ```python
-# my_autoencoder.py
 from galmorph.autoencoder import Autoencoder
 
 class MyAutoencoder(Autoencoder):
-    def encode(self, images):
-        ...  # images: (N, H, W) float array -> (N, latent_dim)
+    def encode(self, images):  # (N, H, W) -> (N, latent_dim)
+        ...
 
-    def decode(self, codes):
-        ...  # (N, latent_dim) -> (N, H, W) float array
+    def decode(self, codes):   # (N, latent_dim) -> (N, H, W)
+        ...
 ```
 
-```bash
-python run_morphometrics.py --dataset ... --autoencoder my_autoencoder:MyAutoencoder
-```
+`--encoder-path` and `--decoder-path` are passed to the constructor as
+positional arguments. For `WandBGalaxyAutoencoder` they are the WandB run path
+and the checkpoint epoch.
 
-## Usage
-
-```bash
-python run_morphometrics.py \
-    --dataset your-org/your-galaxy-dataset --split train \
-    --image-field image --psf-field psf_stamp \
-    --n-samples 2000 --stamp-size 64 \
-    --autoencoder galmorph.autoencoder:WandBGalaxyAutoencoder \
-    --encoder-path entity/project/run_id --decoder-path 1400 \
-    --out-dir results
-```
-
-This will:
-
-1. Load `n-samples` images from the dataset and fit them to `stamp-size` x
-   `stamp-size` postage stamps.
-2. Reconstruct them with the autoencoder (skip `--autoencoder` to only
-   analyze the real images).
-3. Compute HSM moments and (unless `--skip-r`) CAS/Gini-M20/MID for every
-   named set of images.
-4. Save one FITS catalog per set to `results/catalog_<name>.fits`.
-5. Render every applicable plot to `results/plots/`.
-
-Run `python run_morphometrics.py --help` for the full list of options
-(pixel scale, morphology crop size, worker pool size, an optional
-`--binning-field` catalog column for the magnitude/size-binned plots, ...).
-
-### Sampling and reproducibility
-
-`--n-samples` does not draw a random subset: without `--streaming` it
-takes the **first `n-samples` rows** of the dataset, in its stored order
-(`ds.select(range(n_samples))` in `galmorph/data.py`) — so the same
-`--n-samples` value always loads the exact same images, run after run.
-This selection happens once, before anything else — the autoencoder
-reconstructs whichever stamps were loaded, it doesn't draw its own
-subsample — so "real" and "reconstruction" are always built from the
-*same* `n-samples` objects. (With `--streaming`, a shuffle is applied
-first, with a seed currently hardcoded to `0` inside `load_hf_stamps` and
-not exposed on the CLI — still deterministic run to run, just not "the
-first N rows" anymore.)
-
-To measure only the objects the models were **not** trained on, pass
-`--test-size 0.1`: the `--split` is then re-split exactly as Train-AE does
-(`train_test_split(test_size=0.1, seed=42)["test"]`, seed set by
-`--split-seed`), and `--n-samples` takes the first rows of that held-out
-set. That split is shuffled, so a `--split "train[90%:]"` slice would
-select different objects. Pass an `--n-samples` larger than the held-out
-set (e.g. `10000`) to keep all of it. Not available with `--streaming`.
-
-`--flow-seed` (default `0`, used when `--flow-run` is set) seeds three
-things at once: the flow's own `z` draw (i.e. which galaxies get
-generated), which real-dataset PSF gets resampled onto each flow sample,
-and — if `--noise-map-field` is set — the noise realization added to
-them. Changing `--flow-seed` alone therefore moves all three together, so
-a shift in the `flow_prior` statistics can't be attributed to any one of
-them. To check specifically whether the PSF draw affects the results, use
-`--psf-seed` to vary *only* the PSF resampling while `--flow-seed` (and
-so the flow's `z` draw and the noise) stays fixed:
-
-```bash
-# same flow samples and noise every time, only the PSF assignment changes
-python run_morphometrics.py ... --flow-seed 0 --psf-seed 1 --out-dir results_psf1
-python run_morphometrics.py ... --flow-seed 0 --psf-seed 2 --out-dir results_psf2
-```
-
-Any difference between the resulting `flow_prior` catalogs/plots now
-isolates the effect of which PSF got used, since everything else was held
-fixed. `--psf-seed` defaults to `--flow-seed` when omitted, so existing
-commands behave exactly as before.
-
-### Using the library directly
-
-For more control (e.g. comparing more than two datasets, or data that
-isn't on the Hugging Face Hub), call the pieces directly:
+### As a library
 
 ```python
 from galmorph.pipeline import compute_statistics
 from galmorph.plotting import make_all_plots
 
-datasets = {"real": real_stamps, "reconstruction": recon_stamps, "flow_prior": flow_stamps}
-tables = compute_statistics(datasets, pixel_scale=0.1, morph_crop=64)
-make_all_plots(
-    tables, out_dir="results/plots",
-    reference_name="real", paired_names=["reconstruction"],  # flow_prior isn't index-aligned with real
-)
+tables = compute_statistics({"real": real, "reconstruction": recon}, pixel_scale=0.1)
+make_all_plots(tables, out_dir="plots", reference_name="real", paired_names=["reconstruction"])
 ```
 
-## Repository layout
+## Notebooks
+
+| Notebook | Content |
+|---|---|
+| [`real_vs_reconstruction_morphology`](examples/real_vs_reconstruction_morphology.ipynb) | Figure 4 of [Csizi et al. (2025)](https://arxiv.org/abs/2409.07528): M20, Gini, C and A, original vs reconstruction, from the FITS catalogs. |
+| [`noise_ablation_test_split`](examples/noise_ablation_test_split.ipynb) | Effect of the added noise on the indicators, on the test split. |
+| [`visualize_stamps`](examples/visualize_stamps.ipynb) | Raw, masked, reconstructed and noisy stamps side by side ([Colab variant](examples/visualize_stamps_colabversion.ipynb)). |
+
+## Layout
 
 ```
-run_morphometrics.py   CLI entry point
+run_morphometrics.py   CLI
 galmorph/
-  data.py              Hugging Face dataset -> postage stamps
-  autoencoder.py       Autoencoder interface + identity / WandB (AE, flow) implementations
-  stats.py             HSM moments (GalSim) + CAS/Gini-M20/MID (R via rpy2)
-  pipeline.py          Per-dataset / multi-dataset statistics computation
-  plotting.py          All comparison plots
-  r_indicators/        R implementation of CAS/Gini-M20/MID (ported as-is)
+  data.py              Hugging Face dataset -> postage stamps, noise
+  autoencoder.py       Autoencoder interface, WandB autoencoder and flow
+  stats.py             HSM moments (GalSim), CAS/Gini-M20/MID (R)
+  pipeline.py          Statistics for several named datasets
+  plotting.py          Comparison plots
+  r_indicators/        R code from deep_galaxy_models
+examples/              Notebooks
 ```
