@@ -3,7 +3,7 @@
 from multiprocessing import Pool
 
 import numpy as np
-from astropy.table import Table, join, vstack
+from astropy.table import join, vstack
 
 from .stats import moments, morph_stats
 

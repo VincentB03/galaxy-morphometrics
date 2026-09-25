@@ -40,11 +40,11 @@ R CMD INSTALL SDMTools
 ```
 
 **Autoencoder and flow** (`WandBGalaxyAutoencoder`, `--flow-run`). They need the
-`pshear` package from [Train-AE](https://github.com/VincentB03/Train-AE), which
+`pshear` package from [Train-AE](https://github.com/CosmoStat/Train-AE), which
 is not pip-installable:
 
 ```bash
-git clone https://github.com/VincentB03/Train-AE.git
+git clone https://github.com/CosmoStat/Train-AE.git
 export PYTHONPATH="$PWD/Train-AE:$PYTHONPATH"
 pip install -r Train-AE/requirements.txt   # install jax first, with the right CUDA build
 ```

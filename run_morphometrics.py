@@ -19,7 +19,6 @@ import importlib
 import os
 
 import numpy as np
-from astropy.table import Table
 
 from galmorph.data import add_noise, load_hf_stamps
 from galmorph.pipeline import compute_statistics

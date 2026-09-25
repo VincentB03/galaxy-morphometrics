@@ -142,9 +142,7 @@ def add_noise(images, noise_map, seed=None):
 
 
 def _to_array(img):
-    if hasattr(img, "convert") and hasattr(img, "size"):  # PIL.Image
-        return np.asarray(img, dtype=np.float64)
-    return np.asarray(img, dtype=np.float64)
+    return np.asarray(img, dtype=np.float64)  # PIL images, arrays, tensors
 
 
 def _collapse_channels(img, mode):
